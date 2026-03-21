@@ -1,0 +1,87 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://www.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>sa.com.cloudsolutions</groupId>
+    <artifactId>antikythera-test-generator</artifactId>
+    <version>0.1.0</version>
+
+    <name>Antikythera Test Generator</name>
+    <description>Generates unit, integration and end-to-end tests for Java/Spring applications using the Antikythera core library.</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <antikythera.agent.path>${settings.localRepository}/com/github/Cloud-Solutions-International/antikythera-agent/1.0.0.2/antikythera-agent-1.0.0.2.jar</antikythera.agent.path>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>maven-central</id>
+            <name>Maven Central</name>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <!-- Core Antikythera library -->
+        <dependency>
+            <groupId>sa.com.cloudsolutions</groupId>
+            <artifactId>antikythera</artifactId>
+            <version>0.1.3.3</version>
+        </dependency>
+
+        <!-- Test framework for generated tests and for testing this module -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.14.3</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.Cloud-Solutions-International</groupId>
+            <artifactId>antikythera-agent</artifactId>
+            <version>1.0.0.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>21</release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <parallel>none</parallel>
+                    <runOrder>alphabetical</runOrder>
+                    <argLine>-javaagent:${antikythera.agent.path} -XX:+EnableDynamicAgentLoading
+                        --add-opens java.base/java.nio.charset=ALL-UNNAMED
+                        --add-opens java.base/java.lang=ALL-UNNAMED
+                        --add-opens java.base/java.util.stream=ALL-UNNAMED
+                    </argLine>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <mainClass>sa.com.cloudsolutions.antikythera.generator.Antikythera</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
