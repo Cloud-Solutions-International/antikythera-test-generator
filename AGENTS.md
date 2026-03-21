@@ -1,204 +1,197 @@
-# Antikythera Test Generator — Agent Reference Guide
+# Antikythera Test Generator — Agent Guide
 
-**Purpose**: Generate unit, integration, and API tests for Java/Spring applications using the Antikythera core evaluation engine.
+Guidance for AI coding agents working on **antikythera-test-generator**.
 
----
-
-## Architecture Overview
-
-```
-antikythera (core)                    antikythera-test-generator
-──────────────────────────────────    ──────────────────────────────────────
-parser/AbstractCompiler               parser/ServicesParser
-parser/AntikytheraRunTime             parser/RestControllerParser
-evaluator/Evaluator                   generator/TestGenerator  (abstract)
-evaluator/SpringEvaluator  ──────►   generator/UnitTestGenerator
-evaluator/ITestGenerator   (iface)    generator/SpringTestGenerator
-evaluator/GeneratorState   (shared)   generator/Factory
-generator/MethodResponse              generator/Asserter
-generator/TypeWrapper                 generator/JunitAsserter
-                                      generator/TestNgAsserter
-                                      generator/ControllerRequest
-                                      generator/Antikythera  (CLI)
-```
-
-`SpringEvaluator` holds a `List<ITestGenerator>`. At each method exit point it calls
-`generator.createTests(md, response)`. The concrete generators live here; the core has no
-dependency on them.
-
-Shared mutable state (Mockito `when/then` chains, extra imports) is held in
-`evaluator/GeneratorState` (core) and accessed via `TestGenerator`'s static delegates.
+This module generates JUnit 5 / TestNG unit tests, Mockito-backed service tests, and RESTAssured
+API tests for Java/Spring applications. It depends on the `antikythera` core library and must be
+built after it.
 
 ---
 
-## Key Classes
+## Build & Test Commands
 
-### `Antikythera` — CLI entry point
-Singleton. Reads `generator.yml`, pre-processes the classpath, then calls
-`generateUnitTests()` and/or `generateApiTests()`.
+```bash
+# First, install the core library if not already done
+cd ../antikythera
+JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto mvn install -Dmaven.test.skip=true
 
-```java
-Antikythera.getInstance().generateUnitTests();
-Antikythera.getInstance().generateApiTests();
+# Compile this module
+cd ../antikythera-test-generator
+JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto mvn compile
+
+# Run all tests
+JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto mvn test
+
+# Single test class
+JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto mvn test -Dtest=UnitTestGeneratorTest
+
+# Single test method
+JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto mvn test -Dtest=UnitTestGeneratorTest#testBasicMethod
+
+# Run the generator CLI
+JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto mvn exec:java
 ```
 
-### `Factory` — TestGenerator factory
-Creates the right generator type and caches it per class. The `type` argument is one of
-`"unit"`, `"api"`, or `"integration"`.
-
-```java
-TestGenerator gen = Factory.create("unit", compilationUnit);
-```
-
-### `TestGenerator` — abstract base
-- Manages test method name deduplication (`testMethodNames` set).
-- `buildTestMethod(md)` scaffolds a `@Test` method with Javadoc.
-- `removeDuplicateTests()` deduplicates by fingerprinting method bodies.
-- `save()` calls `removeDuplicateTests()` then delegates to subclass.
-- Static methods `addImport`, `addWhenThen`, `getWhenThen`, `clearWhenThen` delegate to `GeneratorState`.
-
-### `UnitTestGenerator` — service-level unit tests
-Generates Mockito-backed JUnit 5 / TestNG tests. Key internal steps inside `createTests()`:
-1. `createInstance()` — emits `new ServiceClass(...)` or `@InjectMocks`
-2. `mockArguments()` — emits `@Mock` field declarations
-3. `applyPreconditions()` — sets up field state required to reach the branch
-4. `addWhens()` — emits `Mockito.when(...).thenReturn(...)` from `GeneratorState.getWhenThen()`
-5. `invokeMethod()` — emits the method call under test
-6. `addAsserts(response)` — emits assertions on the return value or captured output
-
-### `SpringTestGenerator` — REST API tests
-Generates RESTAssured tests for `@RestController` endpoints. Uses `ControllerRequest` to
-model each HTTP call (method, path, headers, body) and emits a fluent RESTAssured chain.
-
-### `Asserter` / `JunitAsserter` / `TestNgAsserter`
-Strategy pattern for assertion style. `JunitAsserter` emits `assertEquals`, `assertTrue`,
-`assertNull`, `assertThrows` etc. Swap with `TestNgAsserter` via config `test_framework: testng`.
-
-```java
-gen.setAsserter(new JunitAsserter());
-```
-
-`JunitAsserter.addFieldAsserts(response, block)` iterates over Lombok/POJO field values
-observed during evaluation and appends getter-based assertions.
-
-### `ServicesParser` — entry point for service tests
-Iterates configured service classes, creates `UnitTestGenerator + SpringEvaluator`, drives
-the branch-coverage loop, and writes files.
-
-### `RestControllerParser` — entry point for API tests
-Iterates configured controllers, maps endpoints to `ControllerRequest` objects, drives
-`SpringTestGenerator`, and writes files.
+> Always prefix `mvn` with `JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto`.
+> The system `/usr/bin/mvn` uses Java 8 and will fail on text blocks and other Java 21 features.
 
 ---
 
-## Generation Pipeline (Unit Tests)
+## ⚠️ Critical Rules
+
+1. **Install antikythera core first.** This module depends on `antikythera` at compile time.
+   If core classes have changed, run `mvn install -Dmaven.test.skip=true` in `../antikythera`
+   before building or testing here.
+
+2. **Do not duplicate `GeneratorState` or `ITestGenerator`.** These live in the core
+   (`antikythera/evaluator/`) and are the defined interface between the two modules. All shared
+   static state (mock imports, when/then chains) belongs there — do not hold it locally in
+   `TestGenerator` or anywhere else in this module.
+
+3. **Do not access `TestGenerator` static fields directly.** The fields `whenThen` and `imports`
+   no longer exist on `TestGenerator`. Always use the static delegate methods:
+   `TestGenerator.addWhenThen()`, `TestGenerator.getWhenThen()`, `TestGenerator.clearWhenThen()`,
+   `TestGenerator.addImport()`, `TestGenerator.getImports()`.
+
+4. **Do not copy shared model types into this module.** `TypeWrapper`, `MethodResponse`, `TruthTable`,
+   `RepositoryQuery*`, and `CopyUtils` live in `antikythera/generator/` and are available as a
+   transitive dependency. Copies here will create divergence.
+
+5. **`Factory` caches generators per class.** One `TestGenerator` instance is created per
+   compilation unit and reused across all method evaluations on that class. Avoid resetting
+   generator-level state (e.g., `testMethodNames`) between methods.
+
+6. **Tests run sequentially.** The `pom.xml` sets `<parallel>none</parallel>` and
+   `<runOrder>alphabetical</runOrder>`. Do not change this — evaluators use static state that
+   is not thread-safe.
+
+---
+
+## Architecture
+
+```
+generator/
+  Antikythera.java          — CLI singleton; reads generator.yml, calls generateUnitTests() / generateApiTests()
+  Factory.java              — creates and caches TestGenerator instances ("unit" | "api" | "integration")
+  TestGenerator.java        — abstract base; name deduplication, duplicate test removal, save()
+  UnitTestGenerator.java    — generates Mockito-backed JUnit/TestNG tests for service classes
+  SpringTestGenerator.java  — generates RESTAssured / MockMvc tests for @RestController classes
+  Asserter.java             — abstract assertion strategy
+  JunitAsserter.java        — JUnit 5 assertion emitter (assertEquals, assertThrows, etc.)
+  TestNgAsserter.java       — TestNG assertion emitter
+  ControllerRequest.java    — models one HTTP request being generated (method, path, params, body)
+
+parser/
+  ServicesParser.java       — entry point for service class test generation; drives branch-coverage loop
+  RestControllerParser.java — entry point for REST controller test generation; maps endpoints to requests
+```
+
+### Generation Pipeline (Unit Tests)
 
 ```
 ServicesParser.evaluateMethod(md)
-  └─ Factory.create("unit", cu)         → UnitTestGenerator
-  └─ EvaluatorFactory.create(cls)       → SpringEvaluator
-  └─ evaluator.addGenerator(gen)
-  └─ evaluator.visit(md)                ← starts branch-coverage loop
-       loop (up to 16 iterations):
-         evaluator.executeMethod(md)
-           └─ records branch conditions into Branching
-           └─ at return stmt: calls gen.createTests(md, response)
-                └─ UnitTestGenerator.buildTestMethod()
-                └─ mockArguments / applyPreconditions / addWhens
-                └─ invokeMethod + addAsserts
-         currentConditional.transition()  ← mark path as travelled
-       end loop
-  └─ generator.save()                   → writes .java file
+  ├─ Factory.create("unit", cu)          → UnitTestGenerator (cached per class)
+  ├─ EvaluatorFactory.create(fqn)        → SpringEvaluator (from antikythera core)
+  ├─ evaluator.addGenerator(gen)
+  └─ evaluator.visit(md)                 ← branch-coverage loop (up to 16 iterations)
+        for each branch:
+          evaluator.executeMethod(md)
+            └─ on each return/exit: gen.createTests(md, response) is called
+                 UnitTestGenerator.buildTestMethod()
+                 → mockArguments()
+                 → applyPreconditions()
+                 → addWhens()            ← reads GeneratorState.getWhenThen()
+                 → invokeMethod()
+                 → addAsserts(response)
+          GeneratorState.clearWhenThen() ← called by SpringEvaluator after each iteration
+  └─ generator.save()                    → removeDuplicateTests(), write .java file
 ```
 
 ---
 
-## Configuration Keys (generator.yml)
+## Key Integration Points with antikythera Core
 
-| Key | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `base_package` | string | — | Root package of the project under test |
-| `base_path` | string | — | Absolute path to `src/main/java` |
-| `output_path` | string | — | Where to write generated test files |
-| `controllers` | list | — | FQN list of `@RestController` classes |
-| `services` | list | — | FQN list of service classes |
-| `test_framework` | string | `junit` | `junit` or `testng` |
-| `mock_with` | string | `Mockito` | Mocking framework |
-| `base_test_class` | string | — | Super-class for every generated test |
-| `extra_imports` | list | — | Additional imports added to each generated file |
-| `skip_void_no_side_effects` | boolean | `true` | Skip void methods with no observable effects |
-| `generate_constructor_tests` | boolean | `false` | Generate tests for constructors |
-| `log_appender` | string | — | FQN of `LogAppender` for log assertion support |
+| Core Class | Used By | Why |
+| :--- | :--- | :--- |
+| `ITestGenerator` | `TestGenerator implements ITestGenerator` | Contract for `SpringEvaluator.addGenerator()` |
+| `GeneratorState` | `TestGenerator` static delegates | Holds imports/when-then written by `MockingEvaluator` |
+| `MethodResponse` | `UnitTestGenerator.createTests(md, response)` | Carries return value or exception from evaluation |
+| `ArgumentGenerator` | `UnitTestGenerator` | Generates mock argument values |
+| `Precondition` | `UnitTestGenerator.applyPreconditions()` | Sets up field state to reach a branch |
+| `SpringEvaluator` | `ServicesParser`, `RestControllerParser` | Created via `EvaluatorFactory.create()` |
 
 ---
 
-## Common Tasks
+## Common Patterns
 
-### Generate unit tests for a service class
+### Generate unit tests for all configured services
 ```java
-// In your driver / main:
 Settings.loadConfigMap(new File("generator.yml"));
 AbstractCompiler.preProcess();
 Antikythera.getInstance().generateUnitTests();
 ```
 
-### Generate API tests for a controller
+### Create a generator for a specific compilation unit
 ```java
-Antikythera.getInstance().generateApiTests();
+TestGenerator gen = Factory.create("unit", compilationUnit);
+gen.setAsserter(new JunitAsserter());
 ```
 
-### Add assertions based on field values (Lombok / POJOs)
+### Add field-level assertions after evaluation
 ```java
 JunitAsserter asserter = new JunitAsserter();
 MethodResponse mr = new MethodResponse();
 mr.setBody(new Variable(evaluator));   // evaluator has run the method
 BlockStmt block = new BlockStmt();
 asserter.addFieldAsserts(mr, block);
-// block now contains assertEquals calls for each observable field
+// block now contains assertEquals calls for each accessible getter
 ```
 
-### Plug a custom asserter
-Implement `Asserter`, then:
+### Plug in a custom asserter
 ```java
-Factory.create("unit", cu).setAsserter(new MyCustomAsserter());
+gen.setAsserter(new MyCustomAsserter());
+// MyCustomAsserter must extend Asserter
 ```
 
-### Hook in a custom generator (Finch)
-Place a `Finch` implementation JAR on the classpath. The core `Evaluator` calls
-`Finch.loadFinches()` at startup; your finch can register additional `ITestGenerator`
-instances via `SpringEvaluator.addGenerator()`.
-
 ---
 
-## State Management
+## State Lifecycle
 
-| State | Location | Lifetime |
+| State | Location | When to clear |
 | :--- | :--- | :--- |
-| `when/then` mock chains | `GeneratorState.whenThen` | Cleared per method execution (`clearWhenThen()`) |
-| Extra imports | `GeneratorState.imports` | Cleared between files (`clearImports()`) |
-| Test method names | `TestGenerator.testMethodNames` | Per generator instance (one per class) |
-| Branch conditions | `Branching` (core) | Cleared between service methods (`Branching.clear()`) |
+| `when/then` chains | `GeneratorState.whenThen` | After each `executeMethod()` call — `GeneratorState.clearWhenThen()` |
+| Extra imports | `GeneratorState.imports` | Between output files — `GeneratorState.clearImports()` |
+| Test method names | `TestGenerator.testMethodNames` | Per generator instance (one per class); do not clear manually |
+| Branch conditions | `Branching` (core) | Before each method — `Branching.clear()` called by `ServicesParser` |
 
 ---
 
-## Agent Cheat Sheet
+## Test Setup
 
-| Task | Class | Method |
-| :--- | :--- | :--- |
-| Start full generation run | `Antikythera` | `getInstance().generateUnitTests()` |
-| Create a generator for a CU | `Factory` | `create("unit" \| "api", cu)` |
-| Build a test method stub | `TestGenerator` | `buildTestMethod(md)` |
-| Add a mock import | `TestGenerator` | `addImport(importDecl)` |
-| Record a when/then | `TestGenerator` | `addWhenThen(expr)` |
-| Emit assertions on fields | `JunitAsserter` | `addFieldAsserts(mr, block)` |
-| Emit assertThrows | `TestGenerator` | `assertThrows(invocation, response)` |
-| Remove duplicate tests | `TestGenerator` | `removeDuplicateTests()` |
-| Write test file to disk | `TestGenerator` | `save()` |
+Tests in this module share the same external test repositories as antikythera core:
+
+- `antikythera-test-helper` — sample entities, services, controllers used as test fixtures
+- `antikythera-sample-project` — realistic Spring Boot project for integration tests
+
+Both must be cloned at the same folder level as this project.
+
+VM arguments required (already set in `pom.xml` via `argLine`):
+```
+-javaagent:${antikythera.agent.path}
+--add-opens java.base/java.util.stream=ALL-UNNAMED
+```
 
 ---
 
-## Extending the Generator
+## Key Files
 
-- **New assertion style**: extend `Asserter`, set via `gen.setAsserter(...)`.
-- **New test type**: extend `TestGenerator`, implement `createTests()` and `addBeforeClass()`, register in `Factory`.
-- **Pre/post hooks**: implement `Finch` and place on the classpath; the core engine discovers it automatically.
+| File | Purpose |
+| :--- | :--- |
+| `generator/Antikythera.java` | CLI entry point; start here to trace the full generation flow |
+| `generator/Factory.java` | Generator creation and caching per class |
+| `generator/TestGenerator.java` | Abstract base; `buildTestMethod()`, `removeDuplicateTests()`, `save()` |
+| `generator/UnitTestGenerator.java` | Core unit test emitter; `createTests()` is the main method |
+| `generator/SpringTestGenerator.java` | REST API test emitter |
+| `generator/JunitAsserter.java` | JUnit 5 assertions; `addFieldAsserts()` for POJO/Lombok fields |
+| `parser/ServicesParser.java` | Drives the branch-coverage evaluation loop for services |
+| `parser/RestControllerParser.java` | Drives test generation for controllers |
