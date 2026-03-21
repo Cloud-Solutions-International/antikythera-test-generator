@@ -224,7 +224,7 @@ class UnitTestGeneratorTest {
     void testApplyPreconditionsForOptionals() throws Exception {
         // Reset MockingRegistry to ensure clean state
         MockingRegistry.reset();
-        TestGenerator.whenThen.clear();
+        TestGenerator.clearWhenThen();
 
         // Test case 1: Optional.empty()
         // Create a Variable with Optional.empty()
@@ -240,13 +240,13 @@ class UnitTestGeneratorTest {
         ug.applyPreconditionsForOptionals(emptyOptionalCall);
 
         // Verify that the whenThen list contains an expression for Optional.empty()
-        assertFalse(TestGenerator.whenThen.isEmpty(), "whenThen list should not be empty after processing empty Optional");
-        String whenThenString = TestGenerator.whenThen.getFirst().toString();
+        assertFalse(TestGenerator.getWhenThen().isEmpty(), "whenThen list should not be empty after processing empty Optional");
+        String whenThenString = TestGenerator.getWhenThen().getFirst().toString();
         assertTrue(whenThenString.contains("Optional.empty()"),
                 "The whenThen expression should contain 'Optional.empty()' but was: " + whenThenString);
 
         // Clear the whenThen list for the next test
-        TestGenerator.whenThen.clear();
+        TestGenerator.clearWhenThen();
 
         // Test case 2: Optional with Evaluator
         // Create a mock Evaluator
@@ -269,8 +269,8 @@ class UnitTestGeneratorTest {
         Mockito.verify(mockEvaluator).getClassName();
 
         // Verify that the whenThen list contains an expression for Optional.of(new TestClass())
-        assertFalse(TestGenerator.whenThen.isEmpty(), "whenThen list should not be empty after processing Optional with Evaluator");
-        whenThenString = TestGenerator.whenThen.getFirst().toString();
+        assertFalse(TestGenerator.getWhenThen().isEmpty(), "whenThen list should not be empty after processing Optional with Evaluator");
+        whenThenString = TestGenerator.getWhenThen().getFirst().toString();
         assertTrue(whenThenString.contains("Optional.of(new TestClass())"),
                 "The whenThen expression should contain 'Optional.of(new TestClass())' but was: " + whenThenString);
     }
@@ -328,7 +328,7 @@ class UnitTestGeneratorMoreTests extends TestHelper {
         AntikytheraRunTime.reset();
         Branching.clear();
         MockingRegistry.reset();
-        TestGenerator.whenThen.clear();
+        TestGenerator.clearWhenThen();
     }
 
     private MethodDeclaration setupMethod(String className, String name) {
