@@ -3,7 +3,7 @@ Antikythera Test Generator
 
 **Automated Unit, Integration and API Test Generation for Java/Spring Applications**
 
-`antikythera-test-generator` is a Maven module built on top of the [Antikythera](../antikythera/README.md)
+`antikythera-test-generator` is a Maven module built on top of the [Antikythera](https://github.com/Cloud-Solutions-International/antikythera)
 core library. It applies Antikythera's Java AST evaluation and expression engine to automatically produce
 test suites — JUnit/TestNG unit tests, Mockito-backed service tests, and RESTAssured API tests — with minimal
 manual effort.
@@ -53,7 +53,7 @@ Spring Source Code
   Generated Test Files
 ```
 
-See [docs/unit-test-generation-sequence.md](../antikythera/docs/unit-test-generation-sequence.md)
+See [docs/unit-test-generation-sequence.md](docs/unit-test-generation-sequence.md)
 for a detailed Mermaid sequence diagram of the full unit-test flow.
 
 ---
