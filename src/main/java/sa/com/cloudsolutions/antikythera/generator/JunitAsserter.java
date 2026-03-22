@@ -41,7 +41,12 @@ public class JunitAsserter extends Asserter {
         if (ex == null) {
             exceptionClass = RuntimeException.class.getName();
         } else if (ex.getCause() != null) {
-            String causeClass = ex.getCause().getClass().getName();
+            Throwable cause = ex.getCause();
+            // Unwrap InvocationTargetException to expose the real underlying exception
+            while (cause instanceof java.lang.reflect.InvocationTargetException && cause.getCause() != null) {
+                cause = cause.getCause();
+            }
+            String causeClass = cause.getClass().getName();
             exceptionClass = causeClass.startsWith("sa.com.cloudsolutions.antikythera") ? Exception.class.getName() : causeClass;
         } else {
             String rawClass = ex.getClass().getName();
