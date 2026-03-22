@@ -154,7 +154,9 @@ extra_imports:
   - com.example.util.TestConstants
 ```
 
-See [antikythera/docs/configurations.md](../antikythera/docs/configurations.md) for the full reference.
+See [docs/configurations.md](docs/configurations.md) for the full reference, and
+[antikythera/docs/configurations.md](../antikythera/docs/configurations.md) for the core settings
+that also apply here.
 
 ---
 
