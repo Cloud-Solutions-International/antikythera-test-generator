@@ -136,7 +136,12 @@ test_framework: junit                     # junit | testng
 mock_with: Mockito
 
 # Optional: skip void methods with no side effects (default: true)
+# See "Testing Void Methods via Side Effects" section for details
 skip_void_no_side_effects: true
+
+# Optional: LogAppender class for asserting SLF4J log output in void method tests
+# See "Testing Void Methods via Side Effects" section for details
+log_appender: com.example.test.LogAppender
 
 # Optional: generate tests for constructors (default: false)
 generate_constructor_tests: false
@@ -291,6 +296,171 @@ will:
 - extend `BaseTest`
 - omit a `@MockBean SecurityContext` field (already declared in the parent)
 - include `setUpBase()` in its `@BeforeEach` method
+
+---
+
+## Testing Void Methods via Side Effects
+
+Methods that return `void` cannot be tested through their return value alone. Antikythera detects
+observable side effects produced during symbolic execution and emits assertions for them instead.
+Two distinct mechanisms are supported: **stdout capture** and **SLF4J log capture**.
+
+### Side Effect Detection
+
+After each symbolic execution of a void method, Antikythera checks for the presence of any of the
+following:
+
+| Side Effect | How Detected |
+| :--- | :--- |
+| `System.out` / `System.err` output | Stdout is redirected during execution; non-empty result triggers a test |
+| SLF4J log statements | A custom `AKLogger` routes all `logger.info/debug/warn/error` calls to `LogRecorder` |
+| Mockito interactions (`when/then`) | Mocked dependency calls recorded in `GeneratorState` |
+| Branching conditions reached | Presence of applicable conditions in `Branching` |
+| Exceptions thrown | `Evaluator.getLastException()` is non-null |
+
+If none of these is present and `skip_void_no_side_effects: true` (the default), no test is
+generated for that execution path. Set `skip_void_no_side_effects: false` to generate tests for
+all void methods regardless.
+
+### Stdout Assertions
+
+If the method writes to `System.out` or `System.err` during execution, the captured text is stored
+in the `MethodResponse` and the generator emits an `assertEquals` against it:
+
+```java
+// Service method under test
+public void printSummary(Order order) {
+    System.out.println("Order total: " + order.getTotal());
+}
+
+// Generated test
+@Test
+void testPrintSummary() {
+    // ... mock setup ...
+    printSummaryAKTest();
+    assertEquals("Order total: 0", outputStream.toString().trim());
+}
+```
+
+The generated test class declares a `ByteArrayOutputStream outputStream` field and a `@BeforeEach`
+that redirects `System.out` to it, so no manual setup is needed.
+
+### SLF4J Log Assertions
+
+For methods that use a logger rather than `System.out`, Antikythera generates assertions against a
+Logback `AppenderBase` that you provide. This requires two steps:
+
+#### 1. Supply a `LogAppender` class
+
+Create a class in your `src/test/java` tree that extends Logback's `AppenderBase<ILoggingEvent>`:
+
+```java
+package com.example.test;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.AppenderBase;
+import java.util.ArrayList;
+import java.util.List;
+
+public class LogAppender extends AppenderBase<ILoggingEvent> {
+
+    public static List<ILoggingEvent> events = new ArrayList<>();
+
+    @Override
+    protected void append(ILoggingEvent event) {
+        events.add(event);
+    }
+
+    public static boolean hasMessage(Level level, String loggerName, String content) {
+        return events.stream().anyMatch(e ->
+                (level == null || e.getLevel() == level) &&
+                (loggerName == null || e.getLoggerName().equals(loggerName)) &&
+                (content == null || e.getFormattedMessage().contains(content)));
+    }
+}
+```
+
+A reference implementation is included in
+[antikythera-sample-project](https://github.com/Cloud-Solutions-International/antikythera-sample-project)
+at `src/test/java/sa/com/cloudsolutions/LogAppender.java`.
+
+#### 2. Configure `log_appender` in `generator.yml`
+
+```yaml
+log_appender: com.example.test.LogAppender
+```
+
+Without this setting, SLF4J log assertions are skipped even when log output is observed.
+
+#### What Gets Generated
+
+When log output is detected, Antikythera generates a `setupLoggers()` `@BeforeEach` method in the
+test class (only once, shared by all test methods in the file):
+
+```java
+@BeforeEach
+/* Antikythera */
+void setupLoggers() {
+    appLogger = (Logger) LoggerFactory.getLogger(com.example.OrderService.class);
+    appLogger.setAdditive(false);
+    logAppender = new LogAppender();
+    logAppender.start();
+    appLogger.addAppender(logAppender);
+    appLogger.setLevel(Level.INFO);
+    LogAppender.events.clear(); // Clear static list from previous tests
+}
+```
+
+It also adds two private fields to the test class:
+
+```java
+private Logger appLogger;
+private LogAppender logAppender;
+```
+
+For each execution path, up to **5 log assertions** are emitted per test method. If logs were
+expected but none were observed, an emptiness assertion is emitted instead:
+
+```java
+// When log output was captured:
+assertTrue(LogAppender.hasMessage(Level.INFO, "com.example.OrderService", "Order placed"));
+assertTrue(LogAppender.hasMessage(Level.WARN, "com.example.OrderService", "Stock low"));
+
+// When no log output was captured:
+assertTrue(LogAppender.events.isEmpty());
+```
+
+### Complete Example
+
+Given a service method:
+
+```java
+@Service
+public class OrderService {
+    private static final Logger logger = LoggerFactory.getLogger(OrderService.class);
+
+    public void placeOrder(Order order) {
+        logger.info("Order placed: {}", order.getId());
+        if (order.getTotal() > 1000) {
+            logger.warn("High-value order: {}", order.getId());
+        }
+    }
+}
+```
+
+With `log_appender: com.example.test.LogAppender` configured, Antikythera generates two tests (one
+per branch) with assertions like:
+
+```java
+@Test
+void testPlaceOrder() {
+    // ... mock setup ...
+    orderService.placeOrder(order);
+    assertTrue(LogAppender.hasMessage(Level.INFO, "com.example.OrderService", "Order placed: "));
+    assertTrue(LogAppender.hasMessage(Level.WARN, "com.example.OrderService", "High-value order: "));
+}
+```
 
 ---
 
