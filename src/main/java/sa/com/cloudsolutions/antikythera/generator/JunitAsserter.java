@@ -41,9 +41,11 @@ public class JunitAsserter extends Asserter {
         if (ex == null) {
             exceptionClass = RuntimeException.class.getName();
         } else if (ex.getCause() != null) {
-            exceptionClass = ex.getCause().getClass().getName();
+            String causeClass = ex.getCause().getClass().getName();
+            exceptionClass = causeClass.startsWith("sa.com.cloudsolutions.antikythera") ? Exception.class.getName() : causeClass;
         } else {
-            exceptionClass = ex.getClass().getName();
+            String rawClass = ex.getClass().getName();
+            exceptionClass = rawClass.startsWith("sa.com.cloudsolutions.antikythera") ? Exception.class.getName() : rawClass;
         }
         assertThrows.addArgument(exceptionClass + ".class");
         assertThrows.addArgument(String.format("() -> %s", invocation.replace(';', ' ')));

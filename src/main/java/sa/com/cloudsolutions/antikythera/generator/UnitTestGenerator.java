@@ -15,9 +15,12 @@ import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.AssignExpr;
+import com.github.javaparser.ast.expr.BooleanLiteralExpr;
 import com.github.javaparser.ast.expr.CastExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.IntegerLiteralExpr;
+import com.github.javaparser.ast.expr.LongLiteralExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
@@ -267,6 +270,9 @@ public class UnitTestGenerator extends TestGenerator {
             addAsserts(response, invocation);
             for (ReferenceType t : md.getThrownExceptions()) {
                 testMethod.addThrownException(t);
+                for (ImportWrapper wrapper : AbstractCompiler.findImport(compilationUnitUnderTest, t)) {
+                    gen.addImport(wrapper.getImport());
+                }
             }
         } else {
             String[] parts = invocation.split("=");
@@ -456,6 +462,9 @@ public class UnitTestGenerator extends TestGenerator {
                     else {
                         mockWithMockito(param, v);
                     }
+                } else {
+                    // Argument was not generated; fall back to a Mockito mock declaration
+                    getBody(testMethod).addStatement(buildMockDeclaration(getTypeName(paramType), nameAsString));
                 }
             }
         }
@@ -764,7 +773,7 @@ public class UnitTestGenerator extends TestGenerator {
         MethodCallExpr methodCall;
         if (value instanceof Evaluator eval) {
             if (baseTestClass != null) {
-                String mock = String.format("Mockito.mock(%s.class, new DefaultObjectAnswer())",eval.getClassName());
+                String mock = String.format("Mockito.mock(%s.class)", eval.getClassName());
                 Expression opt = StaticJavaParser.parseExpression("Optional.of(" + mock +   ")");
                 methodCall = MockingRegistry.buildMockitoWhen(
                         callable.getNameAsString(), opt, result.getVariableName());
@@ -1040,6 +1049,7 @@ public class UnitTestGenerator extends TestGenerator {
 
     @Override
     public void identifyFieldsToBeMocked() {
+        MockingRegistry.clearMockedFields();
         for (TypeDeclaration<?> t : gen.getTypes()) {
             for (FieldDeclaration fd : t.getFields()) {
                 List<TypeWrapper> wrappers = AbstractCompiler.findTypesInVariable(fd.getVariable(0));
@@ -1182,12 +1192,38 @@ public class UnitTestGenerator extends TestGenerator {
                 if (statement instanceof ExpressionStmt exprStmt && exprStmt.getExpression() instanceof VariableDeclarationExpr varDeclExpr) {
                     for (VariableDeclarator varDeclarator : varDeclExpr.getVariables()) {
                         if (varDeclarator.getName().getIdentifier().equals(name)) {
-                            varDeclarator.setInitializer(initialization);
+                            Expression coerced = coerceInitializer(initialization, varDeclarator.getType());
+                            if (coerced != null) {
+                                varDeclarator.setInitializer(coerced);
+                            }
                         }
                     }
                 }
             }
         });
+    }
+
+    private static Expression coerceInitializer(Expression value, Type targetType) {
+        // An AssignExpr should never be used as a variable initializer
+        if (value instanceof AssignExpr) {
+            return null;
+        }
+        String typeName = targetType.asString();
+        // If the new value is any string literal and the target is not a String type,
+        // don't replace — the string cannot be assigned to a non-String variable.
+        if (value instanceof StringLiteralExpr
+                && !typeName.equals("String") && !typeName.equals("java.lang.String")) {
+            return null;
+        }
+        if (typeName.equals("Long") || typeName.equals("long")) {
+            if (value instanceof IntegerLiteralExpr ile) {
+                return new LongLiteralExpr(ile.asInt() + "L");
+            }
+            if (value instanceof BooleanLiteralExpr ble) {
+                return new LongLiteralExpr(ble.getValue() ? "1L" : "0L");
+            }
+        }
+        return value;
     }
 
     public static Expression assertLoggedWithLevel(String className, String level, String expectedMessage) {
