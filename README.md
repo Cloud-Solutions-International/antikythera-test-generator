@@ -153,6 +153,147 @@ See [antikythera/docs/configurations.md](../antikythera/docs/configurations.md) 
 
 ---
 
+## Base Test Class
+
+When `base_test_class` is set, every generated test class will extend that class.  The parent class
+is **not generated** — it must already exist in your project's `src/test/java` tree.  Antikythera
+reads and analyses it at generation time so that it can integrate with whatever setup the parent
+class performs.
+
+### Why Use It
+
+A shared base class lets you factor out boilerplate that would otherwise be duplicated across every
+generated test file:
+
+- Loading the Spring application context or configuring Mockito globally
+- Providing reusable `@BeforeEach` / `@AfterEach` lifecycle hooks
+- Declaring common mocks (e.g. a shared `@MockBean`) so the generator does not re-declare them in
+  each subclass
+- Supplying helper methods or inner classes used by assertions (e.g. a custom Mockito `Answer`)
+
+### Configuration
+
+```yaml
+base_test_class: com.example.test.BaseTest
+```
+
+The value must be the fully qualified class name.  Antikythera derives the source file path from it
+by converting the package/class to a relative path and resolving it under
+`src/test/java` within your project root.
+
+### What Antikythera Does With It
+
+When the base class is configured, `UnitTestGenerator` performs these steps before emitting any
+test code:
+
+1. **Parse** the base class source file with JavaParser.
+2. **Discover mocks** — any field annotated `@Mock` or `@MockBean` in the parent is registered.
+   These are treated as already-declared and will not be re-emitted in the generated subclass.
+3. **Execute `setUpBase()`** — if the parent class contains a method named `setUpBase()`, it is
+   symbolically executed using `TestSuiteEvaluator`.  Any side effects (fields set, mocks
+   registered) are captured and influence the test that is being generated.
+4. **Add `extends`** — the generated test class declaration is updated to extend the configured
+   parent.
+5. **Emit a `setUpBase()` call** — the generated `@BeforeEach` setUp method will include a call to
+   `setUpBase()` so the parent's runtime initialisation runs before each test.
+
+### The `setUpBase()` Hook
+
+`setUpBase()` is the primary integration point between the parent class and the generator.  Define
+it in your base class to perform any per-test initialisation that every generated test needs:
+
+Your base class defines `setUpBase()`:
+
+```java
+// YOUR hand-written base class
+public class BaseTest {
+
+    protected void setUpBase() {
+        TenantContext.setTenantId("test-tenant");
+        SecurityContext.setCurrentUser("test-user");
+    }
+}
+```
+
+Antikythera emits a call to it inside the `@BeforeEach` of every generated test:
+
+```java
+// GENERATED subclass
+public class UserServiceAKTest extends BaseTest {
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        setUpBase();   // ← inserted by Antikythera
+    }
+
+    // ... generated test methods
+}
+```
+
+The method must be `public` or `protected`, take no parameters, and return `void`.  The generator
+will not call it if it does not exist.
+
+### Declaring Shared Mocks
+
+Any mock declared in the parent class is excluded from the generated subclass:
+
+```java
+public class BaseTest {
+
+    @MockBean
+    protected UserRepository userRepository;   // ← Antikythera sees this
+
+    @MockBean
+    protected AuditService auditService;       // ← and this
+}
+```
+
+`userRepository` and `auditService` will be omitted from the `@Mock` / `@MockBean` declarations in
+every generated test, preventing duplicate-bean errors when the test context starts.
+
+### Example Parent Class
+
+```java
+package com.example.test;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.mockito.MockitoAnnotations;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import com.example.security.SecurityContext;
+
+public class BaseTest {
+
+    @MockBean
+    protected SecurityContext securityContext;   // shared across all tests
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        setUpBase();                             // inserted by Antikythera
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContext.clear();
+    }
+
+    protected void setUpBase() {
+        securityContext.setCurrentUser("test-user");
+    }
+}
+```
+
+With `base_test_class: com.example.test.BaseTest` in `generator.yml`, every generated test class
+will:
+
+- extend `BaseTest`
+- omit a `@MockBean SecurityContext` field (already declared in the parent)
+- include `setUpBase()` in its `@BeforeEach` method
+
+---
+
 ## Relationship to `antikythera` Core
 
 `antikythera-test-generator` depends on `antikythera` for:
