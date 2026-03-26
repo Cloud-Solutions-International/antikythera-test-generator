@@ -4,7 +4,7 @@ Configuration is loaded from a `generator.yml` file on the classpath, or from a 
 explicitly to `Settings.loadConfigMap(File)`.
 
 All settings listed in the
-[Antikythera core configuration guide](../../antikythera/docs/configurations.md) also apply here.
+[Antikythera core configuration guide](https://github.com/Cloud-Solutions-International/antikythera/blob/main/docs/configurations.md) also apply here.
 This document covers only the additional settings specific to test generation.
 
 ---

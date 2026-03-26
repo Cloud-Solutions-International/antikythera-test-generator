@@ -155,7 +155,7 @@ extra_imports:
 ```
 
 See [docs/configurations.md](docs/configurations.md) for the full reference, and
-[antikythera/docs/configurations.md](../antikythera/docs/configurations.md) for the core settings
+[antikythera/docs/configurations.md](https://github.com/Cloud-Solutions-International/antikythera/blob/main/docs/configurations.md) for the core settings
 that also apply here.
 
 ---

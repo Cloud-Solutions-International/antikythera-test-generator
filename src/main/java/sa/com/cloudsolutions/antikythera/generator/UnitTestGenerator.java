@@ -807,7 +807,7 @@ public class UnitTestGenerator extends TestGenerator {
                 || value instanceof Float || value instanceof Boolean || value instanceof Character) {
             return Reflect.createLiteralExpression(value);
         }
-        return StaticJavaParser.parseExpression(value.toString());
+        return new StringLiteralExpr(String.valueOf(value));
     }
 
     @SuppressWarnings("java:S5411")
