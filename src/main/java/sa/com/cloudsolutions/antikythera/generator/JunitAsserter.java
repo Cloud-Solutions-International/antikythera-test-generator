@@ -4,6 +4,10 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 
+import java.lang.reflect.InvocationTargetException;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+
 public class JunitAsserter extends Asserter {
     @Override
     public Expression assertNotNull(String variable) {
@@ -42,19 +46,27 @@ public class JunitAsserter extends Asserter {
             exceptionClass = RuntimeException.class.getName();
         } else if (ex.getCause() != null) {
             Throwable cause = ex.getCause();
-            // Unwrap InvocationTargetException to expose the real underlying exception
-            while (cause instanceof java.lang.reflect.InvocationTargetException && cause.getCause() != null) {
+            while (isWrapperException(cause) && cause.getCause() != null) {
                 cause = cause.getCause();
             }
-            String causeClass = cause.getClass().getName();
-            exceptionClass = causeClass.startsWith("sa.com.cloudsolutions.antikythera") ? Exception.class.getName() : causeClass;
+            exceptionClass = cause.getClass().getName();
         } else {
-            String rawClass = ex.getClass().getName();
-            exceptionClass = rawClass.startsWith("sa.com.cloudsolutions.antikythera") ? Exception.class.getName() : rawClass;
+            Throwable actual = ex;
+            while (isWrapperException(actual) && actual.getCause() != null) {
+                actual = actual.getCause();
+            }
+            exceptionClass = actual.getClass().getName();
         }
         assertThrows.addArgument(exceptionClass + ".class");
         assertThrows.addArgument(String.format("() -> %s", invocation.replace(';', ' ')));
         return assertThrows;
+    }
+
+    private static boolean isWrapperException(Throwable throwable) {
+        return throwable instanceof InvocationTargetException
+                || throwable instanceof CompletionException
+                || throwable instanceof ExecutionException
+                || throwable instanceof sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
     }
 
     @Override
