@@ -605,7 +605,13 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private static String buildMockDeclaration(String type, String variableName) {
-        return String.format("%s %s = Mockito.mock(%s.class);", type, variableName, type);
+        return String.format("%s %s = Mockito.mock(%s.class);",
+                type, variableName, getRawTypeName(type));
+    }
+
+    private static String getRawTypeName(String type) {
+        int genericStart = type.indexOf('<');
+        return genericStart >= 0 ? type.substring(0, genericStart).trim() : type.trim();
     }
 
     private void cantMockFinalClass(Parameter param, Variable v, CompilationUnit cu) {
