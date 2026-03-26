@@ -1069,7 +1069,6 @@ public class UnitTestGenerator extends TestGenerator {
 
     @Override
     public void identifyFieldsToBeMocked() {
-        MockingRegistry.clearMockedFields();
         for (TypeDeclaration<?> t : gen.getTypes()) {
             for (FieldDeclaration fd : t.getFields()) {
                 List<TypeWrapper> wrappers = AbstractCompiler.findTypesInVariable(fd.getVariable(0));
@@ -1237,7 +1236,7 @@ public class UnitTestGenerator extends TestGenerator {
         }
         if (typeName.equals("Long") || typeName.equals("long")) {
             if (value instanceof IntegerLiteralExpr ile) {
-                return new LongLiteralExpr(ile.asInt() + "L");
+                return new LongLiteralExpr(ile.getValue() + "L");
             }
             if (value instanceof BooleanLiteralExpr ble) {
                 return new LongLiteralExpr(ble.getValue() ? "1L" : "0L");

@@ -139,6 +139,16 @@ class UnitTestGeneratorTest {
     }
 
     @Test
+    void testIdentifyFieldsToBeMockedPreservesBaseClassMocks() {
+        unitTestGenerator.loadPredefinedBaseClassForTest("sa.com.cloudsolutions.antikythera.evaluator.mock.Hello");
+
+        classUnderTest.addAnnotation("Service");
+        unitTestGenerator.identifyFieldsToBeMocked();
+
+        assertTrue(MockingRegistry.isMockTarget("java.sql.Statement"));
+    }
+
+    @Test
     void testCreateInstanceA() {
         MethodDeclaration methodUnderTest = classUnderTest.findFirst(MethodDeclaration.class,
                 md -> md.getNameAsString().equals("queries2")).orElseThrow();
