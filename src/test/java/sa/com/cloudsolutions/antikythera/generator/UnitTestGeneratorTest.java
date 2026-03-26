@@ -322,6 +322,9 @@ class UnitTestGeneratorMoreTests extends TestHelper {
 
     @BeforeAll
     static void beforeClass() throws IOException {
+        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        loggerContext.getLogger(Logger.ROOT_LOGGER_NAME).setLevel(Level.OFF);
+
         Settings.loadConfigMap(new File("src/test/resources/generator-field-tests.yml"));
         AbstractCompiler.reset();
         AbstractCompiler.preProcess();

@@ -1,5 +1,8 @@
 package sa.com.cloudsolutions.antikythera.evaluator;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
@@ -9,6 +12,7 @@ import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import sa.com.cloudsolutions.antikythera.configuration.Settings;
@@ -46,6 +50,9 @@ class TestSpringEvaluator extends TestHelper {
 
     @BeforeAll
     static void setup() throws IOException {
+        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        loggerContext.getLogger(Logger.ROOT_LOGGER_NAME).setLevel(Level.OFF);
+
         Settings.loadConfigMap(new File("src/test/resources/generator.yml"));
         AbstractCompiler.preProcess();
     }
