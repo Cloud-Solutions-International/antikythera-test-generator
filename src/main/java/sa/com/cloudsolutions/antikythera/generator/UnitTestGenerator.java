@@ -785,9 +785,23 @@ public class UnitTestGenerator extends TestGenerator {
             }
         }
         else {
-            throw new IllegalStateException("Not implemented yet");
+            MethodCallExpr opt = new MethodCallExpr(new NameExpr("Optional"), "of")
+                    .setArguments(new NodeList<>(createOptionalValueExpression(value)));
+            methodCall = MockingRegistry.buildMockitoWhen(
+                    callable.getNameAsString(), opt, result.getVariableName());
         }
         return methodCall;
+    }
+
+    private Expression createOptionalValueExpression(Object value) {
+        if (value instanceof String s) {
+            return new StringLiteralExpr(s);
+        }
+        if (value instanceof Integer || value instanceof Long || value instanceof Double
+                || value instanceof Float || value instanceof Boolean || value instanceof Character) {
+            return Reflect.createLiteralExpression(value);
+        }
+        return StaticJavaParser.parseExpression(value.toString());
     }
 
     @SuppressWarnings("java:S5411")
