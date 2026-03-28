@@ -326,19 +326,19 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private boolean skipWhenUsage(MethodCallExpr mce) {
-        return baseTestClass != null
-                && extractWhenArgumentMethodCall(mce).map(this::skipWhenArgumentUsage).orElse(false);
+        Optional<MethodCallExpr> argMethod = extractWhenArgumentMethodCall(mce);
+        if (argMethod.isEmpty()) {
+            return false;
+        }
+
+        addImportsForCasting(argMethod.get());
+        return baseTestClass != null && skipWhenArgumentUsage(argMethod.get());
     }
 
     private boolean skipWhenArgumentUsage(MethodCallExpr argMethod) {
-        Expression scopeExpr = argMethod.getScope().orElse(null);
-        if (scopeExpr != null && shouldSkipWhenScope(scopeExpr)) {
-            return true;
-        }
-
-        addImportsForCasting(argMethod);
-        return false;
+        return argMethod.getScope().filter(this::shouldSkipWhenScope).isPresent();
     }
+
 
     private static Optional<MethodCallExpr> extractWhenArgumentMethodCall(MethodCallExpr mce) {
         if (!(mce.getScope().orElse(null) instanceof MethodCallExpr scopedCall) || scopedCall.getArguments().isEmpty()) {

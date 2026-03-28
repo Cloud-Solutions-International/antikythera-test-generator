@@ -363,6 +363,22 @@ class UnitTestGeneratorTest {
         assertEquals("0L", ((LongLiteralExpr) resultFalse).getValue(),
                 "false should be coerced to 0L for Long wrapper type");
     }
+
+    @Test
+    void testSkipWhenUsageAddsCastingImportsWithoutBaseTestClass() throws Exception {
+        TestGenerator.getImports().clear();
+        MethodCallExpr expr = StaticJavaParser
+                .parseExpression("Mockito.when(repo.find((List<Integer>) Mockito.any())).thenReturn(List.of())")
+                .asMethodCallExpr();
+        Method method = UnitTestGenerator.class.getDeclaredMethod("skipWhenUsage", MethodCallExpr.class);
+        method.setAccessible(true);
+
+        boolean skipped = (boolean) method.invoke(unitTestGenerator, expr);
+
+        assertFalse(skipped);
+        assertTrue(TestGenerator.getImports().stream()
+                .anyMatch(i -> i.getNameAsString().equals("java.util.List")));
+    }
 }
 
 class UnitTestGeneratorMoreTests extends TestHelper {
