@@ -814,11 +814,20 @@ public class UnitTestGenerator extends TestGenerator {
         if (value instanceof String s) {
             return new StringLiteralExpr(s);
         }
+        if (value instanceof Byte b) {
+            return StaticJavaParser.parseExpression("(byte) " + b);
+        }
+        if (value instanceof Short s) {
+            return StaticJavaParser.parseExpression("(short) " + s);
+        }
         if (value instanceof Integer || value instanceof Long || value instanceof Double
                 || value instanceof Float || value instanceof Boolean || value instanceof Character) {
             return Reflect.createLiteralExpression(value);
         }
-        return new StringLiteralExpr(String.valueOf(value));
+        if (value instanceof Enum<?> e) {
+            return StaticJavaParser.parseExpression(e.getDeclaringClass().getName() + "." + e.name());
+        }
+        return StaticJavaParser.parseExpression("org.mockito.Mockito.mock(" + value.getClass().getName() + ".class)");
     }
 
     @SuppressWarnings("java:S5411")
@@ -968,11 +977,9 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private void assertValueWithNoSideEffects(Variable result, BlockStmt body, Object value) {
-        if (result.getType() != null && (result.getType().isPrimitiveType() || value instanceof String)) {
-            String val = value instanceof String
-                    ? "\"" + value.toString().replace("\"", "\\\"") + "\""
-                    : String.valueOf(value);
-            body.addStatement(asserter.assertEquals(val, "resp"));
+        Expression scalarLiteral = toScalarLiteralExpression(result, value);
+        if (scalarLiteral != null) {
+            body.addStatement(asserter.assertEquals(scalarLiteral.toString(), "resp"));
             return;
         }
 
@@ -980,6 +987,32 @@ public class UnitTestGenerator extends TestGenerator {
         if (value instanceof Collection<?> c) {
             body.addStatement(c.isEmpty() ? asserter.assertEmpty("resp") : asserter.assertNotEmpty("resp"));
         }
+    }
+
+    /**
+     * Returns a literal expression for scalar values so asserter.assertEquals receives
+     * properly rendered Java literals (quotes for strings/chars, L suffix for longs, etc.).
+     */
+    private Expression toScalarLiteralExpression(Variable result, Object value) {
+        if (value instanceof String || isBoxedScalar(value)) {
+            // Reuse optional literal generation to keep scalar formatting consistent.
+            return createOptionalValueExpression(value);
+        }
+        if (result.getType() != null && result.getType().isPrimitiveType()) {
+            return Reflect.createLiteralExpression(value);
+        }
+        return null;
+    }
+
+    private static boolean isBoxedScalar(Object value) {
+        return value instanceof Integer
+                || value instanceof Long
+                || value instanceof Double
+                || value instanceof Float
+                || value instanceof Boolean
+                || value instanceof Character
+                || value instanceof Short
+                || value instanceof Byte;
     }
 
     private void addCapturedOutputAssert(MethodResponse response, BlockStmt body) {
