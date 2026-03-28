@@ -12,11 +12,14 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.BooleanLiteralExpr;
+import com.github.javaparser.ast.expr.LongLiteralExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
+import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.type.Type;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -309,6 +312,56 @@ class UnitTestGeneratorTest {
         String sources = unitTestGenerator.getCompilationUnit().toString();
 
         assertTrue(sources.contains("assertEquals(\"Expected Console Output\", outputStream.toString().trim());"));
+    }
+
+    @Test
+    void testCoerceInitializerBooleanToLongPrimitive() throws Exception {
+        // Use reflection to access private coerceInitializer method
+        java.lang.reflect.Method coerceMethod = UnitTestGenerator.class.getDeclaredMethod(
+                "coerceInitializer", Expression.class, Type.class);
+        coerceMethod.setAccessible(true);
+
+        BooleanLiteralExpr trueExpr = new BooleanLiteralExpr(true);
+        BooleanLiteralExpr falseExpr = new BooleanLiteralExpr(false);
+        Type longPrimitiveType = new PrimitiveType(PrimitiveType.Primitive.LONG);
+
+        Expression resultTrue = (Expression) coerceMethod.invoke(null, trueExpr, longPrimitiveType);
+        Expression resultFalse = (Expression) coerceMethod.invoke(null, falseExpr, longPrimitiveType);
+
+        assertInstanceOf(LongLiteralExpr.class, resultTrue,
+                "BooleanLiteralExpr(true) should be coerced to LongLiteralExpr when targetType is 'long'");
+        assertInstanceOf(LongLiteralExpr.class, resultFalse,
+                "BooleanLiteralExpr(false) should be coerced to LongLiteralExpr when targetType is 'long'");
+
+        assertEquals("1L", ((LongLiteralExpr) resultTrue).getValue(),
+                "true should be coerced to 1L");
+        assertEquals("0L", ((LongLiteralExpr) resultFalse).getValue(),
+                "false should be coerced to 0L");
+    }
+
+    @Test
+    void testCoerceInitializerBooleanToLongWrapper() throws Exception {
+        // Use reflection to access private coerceInitializer method
+        java.lang.reflect.Method coerceMethod = UnitTestGenerator.class.getDeclaredMethod(
+                "coerceInitializer", Expression.class, Type.class);
+        coerceMethod.setAccessible(true);
+
+        BooleanLiteralExpr trueExpr = new BooleanLiteralExpr(true);
+        BooleanLiteralExpr falseExpr = new BooleanLiteralExpr(false);
+        Type longWrapperType = new ClassOrInterfaceType(null, "Long");
+
+        Expression resultTrue = (Expression) coerceMethod.invoke(null, trueExpr, longWrapperType);
+        Expression resultFalse = (Expression) coerceMethod.invoke(null, falseExpr, longWrapperType);
+
+        assertInstanceOf(LongLiteralExpr.class, resultTrue,
+                "BooleanLiteralExpr(true) should be coerced to LongLiteralExpr when targetType is 'Long'");
+        assertInstanceOf(LongLiteralExpr.class, resultFalse,
+                "BooleanLiteralExpr(false) should be coerced to LongLiteralExpr when targetType is 'Long'");
+
+        assertEquals("1L", ((LongLiteralExpr) resultTrue).getValue(),
+                "true should be coerced to 1L for Long wrapper type");
+        assertEquals("0L", ((LongLiteralExpr) resultFalse).getValue(),
+                "false should be coerced to 0L for Long wrapper type");
     }
 }
 
