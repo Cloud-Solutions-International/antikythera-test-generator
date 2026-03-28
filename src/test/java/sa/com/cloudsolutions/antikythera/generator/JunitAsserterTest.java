@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import sa.com.cloudsolutions.antikythera.configuration.Settings;
 import sa.com.cloudsolutions.antikythera.evaluator.Variable;
+import sa.com.cloudsolutions.antikythera.exception.AntikytheraException;
 import sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
 import sa.com.cloudsolutions.antikythera.parser.AbstractCompiler;
 
@@ -68,6 +69,16 @@ class JunitAsserterTest {
         Expression expr = asserter.assertThrows("someMethod()", response);
         assertEquals("assertThrows(java.lang.IllegalArgumentException.class, () -> someMethod())",
                     expr.toString());
+    }
+
+    @Test
+    void assertThrowsPreservesProjectExceptionTypes() {
+        MethodResponse response = new MethodResponse();
+        response.setException(new EvaluatorException("Ouch", new AntikytheraException("Ouch")));
+
+        Expression expr = asserter.assertThrows("someMethod()", response);
+        assertEquals("assertThrows(sa.com.cloudsolutions.antikythera.exception.AntikytheraException.class, () -> someMethod())",
+                expr.toString());
     }
 
     @Test
