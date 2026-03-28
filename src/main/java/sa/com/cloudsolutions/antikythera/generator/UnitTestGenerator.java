@@ -468,7 +468,6 @@ public class UnitTestGenerator extends TestGenerator {
             Variable v = argumentGenerator.getArguments().get(nameAsString);
             if (v != null) {
                 if (v.getValue() != null && v.getValue().getClass().getName().startsWith("java.util")) {
-                    gen.addImport(v.getValue().getClass().getName());
                     mockWithoutMockito(param, v);
                 }
                 else {
@@ -994,8 +993,14 @@ public class UnitTestGenerator extends TestGenerator {
      * properly rendered Java literals (quotes for strings/chars, L suffix for longs, etc.).
      */
     private Expression toScalarLiteralExpression(Variable result, Object value) {
-        if (value instanceof String || isBoxedScalar(value)) {
-            // Reuse optional literal generation to keep scalar formatting consistent.
+        if (value instanceof String s) {
+            return new StringLiteralExpr(s);
+        }
+        if (isBoxedCoreScalar(value)) {
+            return Reflect.createLiteralExpression(value);
+        }
+        if (value instanceof Short || value instanceof Byte) {
+            // Keep byte/short cast formatting consistent with createOptionalValueExpression.
             return createOptionalValueExpression(value);
         }
         if (result.getType() != null && result.getType().isPrimitiveType()) {
@@ -1004,15 +1009,13 @@ public class UnitTestGenerator extends TestGenerator {
         return null;
     }
 
-    private static boolean isBoxedScalar(Object value) {
+    private static boolean isBoxedCoreScalar(Object value) {
         return value instanceof Integer
                 || value instanceof Long
                 || value instanceof Double
                 || value instanceof Float
                 || value instanceof Boolean
-                || value instanceof Character
-                || value instanceof Short
-                || value instanceof Byte;
+                || value instanceof Character;
     }
 
     private void addCapturedOutputAssert(MethodResponse response, BlockStmt body) {
