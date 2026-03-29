@@ -112,9 +112,11 @@ public class Antikythera {
     }
 
     private void copyBaseFiles(String outputPath) throws IOException, XmlPullParserException {
-        String testPath = PACKAGE_PATH.replace("main", "test");
+        // outputPath is already the java source root (e.g. .../src/test/java), so the
+        // package path must be relative to it — not include "src/test/java" again.
+        String antikytheraPkgPath = "sa/com/cloudsolutions/antikythera";
         mavenHelper.copyPom();
-        String name = mavenHelper.copyTemplate("TestHelper.txt", testPath, "base");
+        String name = mavenHelper.copyTemplate("TestHelper.txt", antikytheraPkgPath, "base");
         if (name == null) {
             return;
         }
@@ -123,21 +125,22 @@ public class Antikythera {
         File f = new File(name);
         if (f.renameTo(new File(java))) {
 
-            mavenHelper.copyTemplate("Configurations.java", testPath, "configurations");
+            mavenHelper.copyTemplate("Configurations.java", antikytheraPkgPath, "configurations");
 
-            Path pathToCopy = Paths.get(outputPath, SRC, "test", "resources");
+            // Resources live one level above the java source root (src/test/resources)
+            Path pathToCopy = Paths.get(outputPath).getParent().resolve("resources");
             Files.createDirectories(pathToCopy);
             copyFolder(Paths.get(SRC, "test", "resources"), pathToCopy);
 
-            pathToCopy = Paths.get(outputPath, PACKAGE_PATH, "constants");
+            pathToCopy = Paths.get(outputPath, antikytheraPkgPath, "constants");
             Files.createDirectories(pathToCopy);
             /*
              * Todo resurrect the Constants class that as in the
              * com.sa.com.cloudsolutions.antikythera.constants package
              * and move it to the resources
-             * copyFolder(Paths.get(PACKAGE_PATH, "constants"), pathToCopy);
+             * copyFolder(Paths.get(antikytheraPkgPath, "constants"), pathToCopy);
              */
-            pathToCopy = Paths.get(outputPath, PACKAGE_PATH, "configurations");
+            pathToCopy = Paths.get(outputPath, antikytheraPkgPath, "configurations");
             Files.createDirectories(pathToCopy);
         } else {
             throw new AntikytheraException("Could not copy resources");
@@ -187,6 +190,8 @@ public class Antikythera {
         mavenHelper.readPomFile();
         if (!controllers.isEmpty() || !services.isEmpty()) {
             CopyUtils.createMavenProjectStructure(Settings.getBasePackage(), Settings.getOutputPath());
+        }
+        if (!controllers.isEmpty()) {
             copyBaseFiles(Settings.getOutputPath());
         }
 
