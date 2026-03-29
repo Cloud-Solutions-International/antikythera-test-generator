@@ -59,6 +59,8 @@ import sa.com.cloudsolutions.antikythera.parser.ImportWrapper;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -102,8 +104,12 @@ public class UnitTestGenerator extends TestGenerator {
         String basePath = Settings.getProperty(Settings.BASE_PATH, String.class).orElseThrow();
         String className = AbstractCompiler.getPublicType(cu).getNameAsString() + TEST_NAME_SUFFIX;
 
-        filePath = basePath.replace("main/java", "test/java") + File.separator +
-                packageDecl.replace(".", File.separator) + File.separator + className + ".java";
+        // Navigate from .../src/main/java → .../src/test/java using the Path API
+        // instead of fragile string replacement.
+        Path testRoot = Paths.get(basePath).getParent().getParent().resolve("test").resolve("java");
+        filePath = testRoot.resolve(packageDecl.replace(".", File.separator))
+                .resolve(className + ".java")
+                .toString();
 
         File file = new File(filePath);
 
@@ -219,8 +225,9 @@ public class UnitTestGenerator extends TestGenerator {
      */
     void loadPredefinedBaseClassForTest(String baseClassName) {
         String basePath = Settings.getProperty(Settings.BASE_PATH, String.class).orElseThrow();
-        String helperPath = basePath.replace("src/main", "src/test") + File.separator +
-                AbstractCompiler.classToPath(baseClassName);
+        // Navigate from .../src/main/java → .../src/test/java using the Path API.
+        Path testRoot = Paths.get(basePath).getParent().getParent().resolve("test").resolve("java");
+        String helperPath = testRoot.resolve(AbstractCompiler.classToPath(baseClassName)).toString();
         try {
             baseTestClass = StaticJavaParser.parse(new File(helperPath));
             for (TypeDeclaration<?> t : baseTestClass.getTypes()) {
