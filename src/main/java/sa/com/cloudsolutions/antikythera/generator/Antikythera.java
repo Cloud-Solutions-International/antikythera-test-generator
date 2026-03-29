@@ -183,8 +183,12 @@ public class Antikythera {
     }
 
     public void preProcess() throws IOException, XmlPullParserException {
-        CopyUtils.createMavenProjectStructure(Settings.getBasePackage(), Settings.getOutputPath());
-        copyBaseFiles(Settings.getOutputPath());
+        mavenHelper = new MavenHelper();
+        mavenHelper.readPomFile();
+        if (!controllers.isEmpty() || !services.isEmpty()) {
+            CopyUtils.createMavenProjectStructure(Settings.getBasePackage(), Settings.getOutputPath());
+            copyBaseFiles(Settings.getOutputPath());
+        }
 
         AbstractCompiler.preProcess();
 

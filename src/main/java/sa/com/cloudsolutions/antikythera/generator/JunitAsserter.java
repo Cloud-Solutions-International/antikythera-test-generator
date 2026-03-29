@@ -4,6 +4,10 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 
+import java.lang.reflect.InvocationTargetException;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+
 public class JunitAsserter extends Asserter {
     @Override
     public Expression assertNotNull(String variable) {
@@ -41,13 +45,28 @@ public class JunitAsserter extends Asserter {
         if (ex == null) {
             exceptionClass = RuntimeException.class.getName();
         } else if (ex.getCause() != null) {
-            exceptionClass = ex.getCause().getClass().getName();
+            Throwable cause = ex.getCause();
+            while (isWrapperException(cause) && cause.getCause() != null) {
+                cause = cause.getCause();
+            }
+            exceptionClass = cause.getClass().getName();
         } else {
-            exceptionClass = ex.getClass().getName();
+            Throwable actual = ex;
+            while (isWrapperException(actual) && actual.getCause() != null) {
+                actual = actual.getCause();
+            }
+            exceptionClass = actual.getClass().getName();
         }
         assertThrows.addArgument(exceptionClass + ".class");
         assertThrows.addArgument(String.format("() -> %s", invocation.replace(';', ' ')));
         return assertThrows;
+    }
+
+    private static boolean isWrapperException(Throwable throwable) {
+        return throwable instanceof InvocationTargetException
+                || throwable instanceof CompletionException
+                || throwable instanceof ExecutionException
+                || throwable instanceof sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
     }
 
     @Override

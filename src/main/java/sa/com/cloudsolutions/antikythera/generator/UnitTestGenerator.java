@@ -15,9 +15,12 @@ import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.AssignExpr;
+import com.github.javaparser.ast.expr.BooleanLiteralExpr;
 import com.github.javaparser.ast.expr.CastExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.IntegerLiteralExpr;
+import com.github.javaparser.ast.expr.LongLiteralExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
@@ -267,6 +270,9 @@ public class UnitTestGenerator extends TestGenerator {
             addAsserts(response, invocation);
             for (ReferenceType t : md.getThrownExceptions()) {
                 testMethod.addThrownException(t);
+                for (ImportWrapper wrapper : AbstractCompiler.findImport(compilationUnitUnderTest, t)) {
+                    gen.addImport(wrapper.getImport());
+                }
             }
         } else {
             String[] parts = invocation.split("=");
@@ -320,24 +326,31 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private boolean skipWhenUsage(MethodCallExpr mce) {
-        Optional<Expression> scope = mce.getScope();
-        if (scope.isPresent() && scope.get() instanceof MethodCallExpr scoped) {
+        return baseTestClass != null
+                && extractWhenArgumentMethodCall(mce).map(this::skipWhenArgumentUsage).orElse(false);
+    }
 
-            Optional<Expression> arg = scoped.getArguments().getFirst();
-            if (arg.isPresent() && baseTestClass != null && arg.get() instanceof MethodCallExpr argMethod) {
-                Optional<Expression> optScope = argMethod.getScope();
-                if (optScope.isPresent()) {
-                    if (mockedByBaseTestClass(optScope.orElseThrow())) {
-                        return true;
-                    }
-                    if (!variables.containsKey(optScope.get().toString())) {
-                        return true;
-                    }
-                }
-                addImportsForCasting(argMethod);
-            }
+    private boolean skipWhenArgumentUsage(MethodCallExpr argMethod) {
+        Expression scopeExpr = argMethod.getScope().orElse(null);
+        if (scopeExpr != null && shouldSkipWhenScope(scopeExpr)) {
+            return true;
         }
+
+        addImportsForCasting(argMethod);
         return false;
+    }
+
+    private static Optional<MethodCallExpr> extractWhenArgumentMethodCall(MethodCallExpr mce) {
+        if (!(mce.getScope().orElse(null) instanceof MethodCallExpr scopedCall) || scopedCall.getArguments().isEmpty()) {
+            return Optional.empty();
+        }
+
+        Expression firstArg = scopedCall.getArgument(0);
+        return firstArg instanceof MethodCallExpr argMethod ? Optional.of(argMethod) : Optional.empty();
+    }
+
+    private boolean shouldSkipWhenScope(Expression scopeExpr) {
+        return mockedByBaseTestClass(scopeExpr) || !variables.containsKey(scopeExpr.toString());
     }
 
     /**
@@ -440,23 +453,30 @@ public class UnitTestGenerator extends TestGenerator {
 
     void mockArguments() {
         for (var param : methodUnderTest.getParameters()) {
-            Type paramType = param.getType();
-            String nameAsString = param.getNameAsString();
-            if (paramType.isPrimitiveType() ||
-                    (paramType.isClassOrInterfaceType() && paramType.asClassOrInterfaceType().isBoxedType())) {
-                mockSimpleArgument(param, nameAsString, paramType);
-            } else {
-                addClassImports(paramType);
-                Variable v = argumentGenerator.getArguments().get(nameAsString);
-                if (v != null) {
-                    if (v.getValue() != null && v.getValue().getClass().getName().startsWith("java.util")) {
-                        gen.addImport(v.getValue().getClass().getName());
-                        mockWithoutMockito(param, v);
-                    }
-                    else {
-                        mockWithMockito(param, v);
-                    }
+            mockArgument(param);
+        }
+    }
+
+    private void mockArgument(Parameter param) {
+        Type paramType = param.getType();
+        String nameAsString = param.getNameAsString();
+        if (paramType.isPrimitiveType() ||
+                (paramType.isClassOrInterfaceType() && paramType.asClassOrInterfaceType().isBoxedType())) {
+            mockSimpleArgument(param, nameAsString, paramType);
+        } else {
+            addClassImports(paramType);
+            Variable v = argumentGenerator.getArguments().get(nameAsString);
+            if (v != null) {
+                if (v.getValue() != null && v.getValue().getClass().getName().startsWith("java.util")) {
+                    gen.addImport(v.getValue().getClass().getName());
+                    mockWithoutMockito(param, v);
                 }
+                else {
+                    mockWithMockito(param, v);
+                }
+            } else {
+                // Argument was not generated; fall back to a Mockito mock declaration
+                getBody(testMethod).addStatement(buildMockDeclaration(getTypeName(paramType), nameAsString));
             }
         }
     }
@@ -596,7 +616,13 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private static String buildMockDeclaration(String type, String variableName) {
-        return String.format("%s %s = Mockito.mock(%s.class);", type, variableName, type);
+        return String.format("%s %s = Mockito.mock(%s.class);",
+                type, variableName, getRawTypeName(type));
+    }
+
+    private static String getRawTypeName(String type) {
+        int genericStart = type.indexOf('<');
+        return genericStart >= 0 ? type.substring(0, genericStart).trim() : type.trim();
     }
 
     private void cantMockFinalClass(Parameter param, Variable v, CompilationUnit cu) {
@@ -764,7 +790,7 @@ public class UnitTestGenerator extends TestGenerator {
         MethodCallExpr methodCall;
         if (value instanceof Evaluator eval) {
             if (baseTestClass != null) {
-                String mock = String.format("Mockito.mock(%s.class, new DefaultObjectAnswer())",eval.getClassName());
+                String mock = String.format("Mockito.mock(%s.class)", eval.getClassName());
                 Expression opt = StaticJavaParser.parseExpression("Optional.of(" + mock +   ")");
                 methodCall = MockingRegistry.buildMockitoWhen(
                         callable.getNameAsString(), opt, result.getVariableName());
@@ -776,9 +802,23 @@ public class UnitTestGenerator extends TestGenerator {
             }
         }
         else {
-            throw new IllegalStateException("Not implemented yet");
+            MethodCallExpr opt = new MethodCallExpr(new NameExpr("Optional"), "of")
+                    .setArguments(new NodeList<>(createOptionalValueExpression(value)));
+            methodCall = MockingRegistry.buildMockitoWhen(
+                    callable.getNameAsString(), opt, result.getVariableName());
         }
         return methodCall;
+    }
+
+    private Expression createOptionalValueExpression(Object value) {
+        if (value instanceof String s) {
+            return new StringLiteralExpr(s);
+        }
+        if (value instanceof Integer || value instanceof Long || value instanceof Double
+                || value instanceof Float || value instanceof Boolean || value instanceof Character) {
+            return Reflect.createLiteralExpression(value);
+        }
+        return new StringLiteralExpr(String.valueOf(value));
     }
 
     @SuppressWarnings("java:S5411")
@@ -914,26 +954,35 @@ public class UnitTestGenerator extends TestGenerator {
     private void noSideEffectAsserts(MethodResponse response) {
         Variable result = response.getBody();
         BlockStmt body = getBody(testMethod);
-        if (result.getValue() != null) {
-            if (result.getType() != null && (result.getType().isPrimitiveType() || result.getValue() instanceof String)) {
-                String val = result.getValue() instanceof String ? "\"" + result.getValue().toString().replace("\"", "\\\"") + "\"" : String.valueOf(result.getValue());
-                body.addStatement(asserter.assertEquals(val, "resp"));
-            }
-            else {
-                body.addStatement(asserter.assertNotNull("resp"));
-                if (result.getValue() instanceof Collection<?> c) {
-                    if (c.isEmpty()) {
-                        body.addStatement(asserter.assertEmpty("resp"));
-                    } else {
-                        body.addStatement(asserter.assertNotEmpty("resp"));
-                    }
-                }
-            }
-            asserter.addFieldAsserts(response, body);
-        }
-        else {
+        Object value = result.getValue();
+
+        if (value == null) {
             body.addStatement(asserter.assertNull("resp"));
+            addCapturedOutputAssert(response, body);
+            return;
         }
+
+        assertValueWithNoSideEffects(result, body, value);
+        asserter.addFieldAsserts(response, body);
+        addCapturedOutputAssert(response, body);
+    }
+
+    private void assertValueWithNoSideEffects(Variable result, BlockStmt body, Object value) {
+        if (result.getType() != null && (result.getType().isPrimitiveType() || value instanceof String)) {
+            String val = value instanceof String
+                    ? "\"" + value.toString().replace("\"", "\\\"") + "\""
+                    : String.valueOf(value);
+            body.addStatement(asserter.assertEquals(val, "resp"));
+            return;
+        }
+
+        body.addStatement(asserter.assertNotNull("resp"));
+        if (value instanceof Collection<?> c) {
+            body.addStatement(c.isEmpty() ? asserter.assertEmpty("resp") : asserter.assertNotEmpty("resp"));
+        }
+    }
+
+    private void addCapturedOutputAssert(MethodResponse response, BlockStmt body) {
         if (response.getCapturedOutput() != null && !response.getCapturedOutput().trim().isEmpty()) {
             body.addStatement(asserter.assertOutput(response.getCapturedOutput().trim()));
         }
@@ -1177,17 +1226,49 @@ public class UnitTestGenerator extends TestGenerator {
 
     static void replaceInitializer(MethodDeclaration method, String name, Expression initialization) {
         method.getBody().ifPresent(body ->{
-            NodeList<Statement> statements = method.getBody().get().getStatements();
+            NodeList<Statement> statements = body.getStatements();
             for (Statement statement : statements) {
-                if (statement instanceof ExpressionStmt exprStmt && exprStmt.getExpression() instanceof VariableDeclarationExpr varDeclExpr) {
-                    for (VariableDeclarator varDeclarator : varDeclExpr.getVariables()) {
-                        if (varDeclarator.getName().getIdentifier().equals(name)) {
-                            varDeclarator.setInitializer(initialization);
-                        }
+                replaceInitializer(name, initialization, statement);
+            }
+        });
+    }
+
+    private static void replaceInitializer(String name, Expression initialization, Statement statement) {
+        if (statement instanceof ExpressionStmt exprStmt && exprStmt.getExpression() instanceof VariableDeclarationExpr varDeclExpr) {
+            for (VariableDeclarator varDeclarator : varDeclExpr.getVariables()) {
+                if (varDeclarator.getName().getIdentifier().equals(name)) {
+                    Expression coerced = coerceInitializer(initialization, varDeclarator.getType());
+                    if (coerced != null) {
+                        varDeclarator.setInitializer(coerced);
                     }
                 }
             }
-        });
+        }
+    }
+
+    private static Expression coerceInitializer(Expression value, Type targetType) {
+        // An AssignExpr should never be used as a variable initializer
+        if (value instanceof AssignExpr) {
+            return null;
+        }
+        String typeName = targetType.asString();
+        // If the new value is any string literal and the target is not a String type,
+        // don't replace — the string cannot be assigned to a non-String variable.
+        if (value instanceof StringLiteralExpr
+                && !typeName.equals("String") && !typeName.equals("java.lang.String")) {
+            return null;
+        }
+        if (typeName.equals("Long") || typeName.equals("long")) {
+            if (value instanceof IntegerLiteralExpr ile) {
+                return new LongLiteralExpr(ile.getValue() + "L");
+            }
+            // Coerce boolean literals to long: true becomes 1L, false becomes 0L.
+            // This is deliberate test-data widening to support numeric contexts that accept boolean inputs.
+            if (value instanceof BooleanLiteralExpr ble) {
+                return new LongLiteralExpr(ble.getValue() ? "1L" : "0L");
+            }
+        }
+        return value;
     }
 
     public static Expression assertLoggedWithLevel(String className, String level, String expectedMessage) {
