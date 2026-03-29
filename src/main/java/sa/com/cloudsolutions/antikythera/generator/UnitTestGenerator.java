@@ -1311,6 +1311,30 @@ public class UnitTestGenerator extends TestGenerator {
                 return new LongLiteralExpr(ble.getValue() ? "1L" : "0L");
             }
         }
+        // Convert immutable List.of()/Set.of() to mutable equivalents so generated tests
+        // can pass the collection to methods that mutate it (e.g. errors.add(...)).
+        if (value instanceof MethodCallExpr mce) {
+            String name = mce.getNameAsString();
+            if (name.equals("of") && mce.getScope().isPresent()) {
+                String scope = mce.getScope().get().toString();
+                if (scope.equals("List")) {
+                    if (mce.getArguments().isEmpty()) {
+                        return StaticJavaParser.parseExpression("new ArrayList<>()");
+                    } else {
+                        return StaticJavaParser.parseExpression(
+                                String.format("new ArrayList<>(java.util.Arrays.asList(%s))", mce.getArgument(0)));
+                    }
+                }
+                if (scope.equals("Set")) {
+                    if (mce.getArguments().isEmpty()) {
+                        return StaticJavaParser.parseExpression("new HashSet<>()");
+                    } else {
+                        return StaticJavaParser.parseExpression(
+                                String.format("new HashSet<>(java.util.Arrays.asList(%s))", mce.getArgument(0)));
+                    }
+                }
+            }
+        }
         return value;
     }
 
