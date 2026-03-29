@@ -49,13 +49,13 @@ public class JunitAsserter extends Asserter {
             while (isWrapperException(cause) && cause.getCause() != null) {
                 cause = cause.getCause();
             }
-            exceptionClass = cause.getClass().getName();
+            exceptionClass = isWrapperException(cause) ? Exception.class.getName() : cause.getClass().getName();
         } else {
             Throwable actual = ex;
             while (isWrapperException(actual) && actual.getCause() != null) {
                 actual = actual.getCause();
             }
-            exceptionClass = actual.getClass().getName();
+            exceptionClass = isWrapperException(actual) ? Exception.class.getName() : actual.getClass().getName();
         }
         /*
          * Gson failures are sensitive to mock depth; symbolic evaluation may predict JsonIOException
@@ -75,6 +75,7 @@ public class JunitAsserter extends Asserter {
                 || throwable instanceof ExecutionException
                 || throwable instanceof sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
     }
+
 
     @Override
     public Expression assertDoesNotThrow(String invocation) {

@@ -8,6 +8,7 @@ import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.type.PrimitiveType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sa.com.cloudsolutions.antikythera.evaluator.AntikytheraRunTime;
@@ -64,13 +65,26 @@ public abstract class Asserter {
     private String findGetter(Variable value, String fieldName, TypeDeclaration<?> type) {
 
         /*
-         * For `boolean` fields that start with `is` immediately followed by a title-case
-         * letter, nothing is prefixed to generate the getter name.
-         * So if you have a field boolean isOrganic the getter will be isOrganic()
+         * For `boolean` (primitive) fields that start with `is` immediately followed by a
+         * title-case letter, nothing is prefixed to generate the getter name.
+         * So if you have a field `boolean isOrganic` the getter will be `isOrganic()`.
+         * For `Boolean` (wrapper) fields the getter is always `getXxx()`, even when the
+         * field name starts with `is` (e.g. `Boolean isActive` → `getIsActive()`).
+         * We must consult the *declared* field type here, not the runtime type stored on
+         * the Variable, because the evaluator may have stored the value as a primitive
+         * boolean while the source field is declared as Boolean.
          */
         String getter;
-        if (value.getType() != null && value.getType().isPrimitiveType()
-                && value.getType().asString().equals("boolean") && fieldName.startsWith("is")) {
+        boolean declaredAsPrimitiveBoolean = false;
+        for (FieldDeclaration fd : type.getFields()) {
+            if (fd.getVariable(0).getNameAsString().equals(fieldName)) {
+                com.github.javaparser.ast.type.Type declaredType = fd.getElementType();
+                declaredAsPrimitiveBoolean = declaredType.isPrimitiveType()
+                        && declaredType.asPrimitiveType().getType() == PrimitiveType.Primitive.BOOLEAN;
+                break;
+            }
+        }
+        if (declaredAsPrimitiveBoolean && fieldName.startsWith("is")) {
             getter = fieldName;
         }
         else {
