@@ -143,6 +143,7 @@ class UnitTestGeneratorTest {
 
     @Test
     void testIdentifyFieldsToBeMockedPreservesBaseClassMocks() {
+        MockingRegistry.reset();
         unitTestGenerator.loadPredefinedBaseClassForTest("sa.com.cloudsolutions.antikythera.evaluator.mock.Hello");
 
         classUnderTest.addAnnotation("Service");
@@ -362,6 +363,99 @@ class UnitTestGeneratorTest {
                 "true should be coerced to 1L for Long wrapper type");
         assertEquals("0L", ((LongLiteralExpr) resultFalse).getValue(),
                 "false should be coerced to 0L for Long wrapper type");
+    }
+
+    @Test
+    void testSkipWhenUsageAddsCastingImportsWithoutBaseTestClass() throws Exception {
+        TestGenerator.getImports().clear();
+        MethodCallExpr expr = StaticJavaParser
+                .parseExpression("Mockito.when(repo.find((List<Integer>) Mockito.any())).thenReturn(List.of())")
+                .asMethodCallExpr();
+        Method method = UnitTestGenerator.class.getDeclaredMethod("skipWhenUsage", MethodCallExpr.class);
+        method.setAccessible(true);
+
+        boolean skipped = (boolean) method.invoke(unitTestGenerator, expr);
+
+        assertFalse(skipped);
+        assertTrue(TestGenerator.getImports().stream()
+                .anyMatch(i -> i.getNameAsString().equals("java.util.List")));
+    }
+
+    @Test
+    void testCreateOptionalValueExpressionKeepsObjectType() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod("createOptionalValueExpression", Object.class);
+        method.setAccessible(true);
+
+        Expression expr = (Expression) method.invoke(unitTestGenerator, new Object());
+
+        assertFalse(expr.isStringLiteralExpr());
+        assertEquals("org.mockito.Mockito.mock(java.lang.Object.class)", expr.toString());
+    }
+
+    @Test
+    void testAssertValueWithNoSideEffectsBoxedLong() throws Exception {
+        java.lang.reflect.Method m = UnitTestGenerator.class.getDeclaredMethod(
+                "toScalarLiteralExpression", sa.com.cloudsolutions.antikythera.evaluator.Variable.class, Object.class);
+        m.setAccessible(true);
+
+        sa.com.cloudsolutions.antikythera.evaluator.Variable v = new sa.com.cloudsolutions.antikythera.evaluator.Variable(42L);
+        Expression lit = (Expression) m.invoke(unitTestGenerator, v, 42L);
+        assertEquals("42", lit.toString());
+    }
+
+    @Test
+    void testAssertValueWithNoSideEffectsBoxedCharacter() throws Exception {
+        java.lang.reflect.Method m = UnitTestGenerator.class.getDeclaredMethod(
+                "toScalarLiteralExpression", sa.com.cloudsolutions.antikythera.evaluator.Variable.class, Object.class);
+        m.setAccessible(true);
+
+        sa.com.cloudsolutions.antikythera.evaluator.Variable v = new sa.com.cloudsolutions.antikythera.evaluator.Variable('z');
+        Expression lit = (Expression) m.invoke(unitTestGenerator, v, 'z');
+        assertEquals("'z'", lit.toString());
+    }
+
+    @Test
+    void testAssertValueWithNoSideEffectsBoxedBoolean() throws Exception {
+        java.lang.reflect.Method m = UnitTestGenerator.class.getDeclaredMethod(
+                "toScalarLiteralExpression", sa.com.cloudsolutions.antikythera.evaluator.Variable.class, Object.class);
+        m.setAccessible(true);
+
+        sa.com.cloudsolutions.antikythera.evaluator.Variable v = new sa.com.cloudsolutions.antikythera.evaluator.Variable(true);
+        Expression lit = (Expression) m.invoke(unitTestGenerator, v, true);
+        assertEquals("true", lit.toString());
+    }
+
+    @Test
+    void testAssertValueWithNoSideEffectsString() throws Exception {
+        java.lang.reflect.Method m = UnitTestGenerator.class.getDeclaredMethod(
+                "toScalarLiteralExpression", sa.com.cloudsolutions.antikythera.evaluator.Variable.class, Object.class);
+        m.setAccessible(true);
+
+        sa.com.cloudsolutions.antikythera.evaluator.Variable v = new sa.com.cloudsolutions.antikythera.evaluator.Variable("hello");
+        Expression lit = (Expression) m.invoke(unitTestGenerator, v, "hello");
+        assertEquals("\"hello\"", lit.toString());
+    }
+
+    @Test
+    void testAssertValueWithNoSideEffectsBoxedShort() throws Exception {
+        java.lang.reflect.Method m = UnitTestGenerator.class.getDeclaredMethod(
+                "toScalarLiteralExpression", sa.com.cloudsolutions.antikythera.evaluator.Variable.class, Object.class);
+        m.setAccessible(true);
+
+        sa.com.cloudsolutions.antikythera.evaluator.Variable v = new sa.com.cloudsolutions.antikythera.evaluator.Variable((short) 7);
+        Expression lit = (Expression) m.invoke(unitTestGenerator, v, (short) 7);
+        assertEquals("(short) 7", lit.toString());
+    }
+
+    @Test
+    void testAssertValueWithNoSideEffectsBoxedByte() throws Exception {
+        java.lang.reflect.Method m = UnitTestGenerator.class.getDeclaredMethod(
+                "toScalarLiteralExpression", sa.com.cloudsolutions.antikythera.evaluator.Variable.class, Object.class);
+        m.setAccessible(true);
+
+        sa.com.cloudsolutions.antikythera.evaluator.Variable v = new sa.com.cloudsolutions.antikythera.evaluator.Variable((byte) 5);
+        Expression lit = (Expression) m.invoke(unitTestGenerator, v, (byte) 5);
+        assertEquals("(byte) 5", lit.toString());
     }
 }
 

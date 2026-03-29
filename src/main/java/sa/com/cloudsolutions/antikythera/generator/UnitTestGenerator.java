@@ -326,19 +326,19 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private boolean skipWhenUsage(MethodCallExpr mce) {
-        return baseTestClass != null
-                && extractWhenArgumentMethodCall(mce).map(this::skipWhenArgumentUsage).orElse(false);
+        Optional<MethodCallExpr> argMethod = extractWhenArgumentMethodCall(mce);
+        if (argMethod.isEmpty()) {
+            return false;
+        }
+
+        addImportsForCasting(argMethod.get());
+        return baseTestClass != null && skipWhenArgumentUsage(argMethod.get());
     }
 
     private boolean skipWhenArgumentUsage(MethodCallExpr argMethod) {
-        Expression scopeExpr = argMethod.getScope().orElse(null);
-        if (scopeExpr != null && shouldSkipWhenScope(scopeExpr)) {
-            return true;
-        }
-
-        addImportsForCasting(argMethod);
-        return false;
+        return argMethod.getScope().filter(this::shouldSkipWhenScope).isPresent();
     }
+
 
     private static Optional<MethodCallExpr> extractWhenArgumentMethodCall(MethodCallExpr mce) {
         if (!(mce.getScope().orElse(null) instanceof MethodCallExpr scopedCall) || scopedCall.getArguments().isEmpty()) {
@@ -468,7 +468,6 @@ public class UnitTestGenerator extends TestGenerator {
             Variable v = argumentGenerator.getArguments().get(nameAsString);
             if (v != null) {
                 if (v.getValue() != null && v.getValue().getClass().getName().startsWith("java.util")) {
-                    gen.addImport(v.getValue().getClass().getName());
                     mockWithoutMockito(param, v);
                 }
                 else {
@@ -814,11 +813,20 @@ public class UnitTestGenerator extends TestGenerator {
         if (value instanceof String s) {
             return new StringLiteralExpr(s);
         }
+        if (value instanceof Byte b) {
+            return StaticJavaParser.parseExpression("(byte) " + b);
+        }
+        if (value instanceof Short s) {
+            return StaticJavaParser.parseExpression("(short) " + s);
+        }
         if (value instanceof Integer || value instanceof Long || value instanceof Double
                 || value instanceof Float || value instanceof Boolean || value instanceof Character) {
             return Reflect.createLiteralExpression(value);
         }
-        return new StringLiteralExpr(String.valueOf(value));
+        if (value instanceof Enum<?> e) {
+            return StaticJavaParser.parseExpression(e.getDeclaringClass().getName() + "." + e.name());
+        }
+        return StaticJavaParser.parseExpression("org.mockito.Mockito.mock(" + value.getClass().getName() + ".class)");
     }
 
     @SuppressWarnings("java:S5411")
@@ -968,11 +976,9 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private void assertValueWithNoSideEffects(Variable result, BlockStmt body, Object value) {
-        if (result.getType() != null && (result.getType().isPrimitiveType() || value instanceof String)) {
-            String val = value instanceof String
-                    ? "\"" + value.toString().replace("\"", "\\\"") + "\""
-                    : String.valueOf(value);
-            body.addStatement(asserter.assertEquals(val, "resp"));
+        Expression scalarLiteral = toScalarLiteralExpression(result, value);
+        if (scalarLiteral != null) {
+            body.addStatement(asserter.assertEquals(scalarLiteral.toString(), "resp"));
             return;
         }
 
@@ -980,6 +986,36 @@ public class UnitTestGenerator extends TestGenerator {
         if (value instanceof Collection<?> c) {
             body.addStatement(c.isEmpty() ? asserter.assertEmpty("resp") : asserter.assertNotEmpty("resp"));
         }
+    }
+
+    /**
+     * Returns a literal expression for scalar values so asserter.assertEquals receives
+     * properly rendered Java literals (quotes for strings/chars, L suffix for longs, etc.).
+     */
+    private Expression toScalarLiteralExpression(Variable result, Object value) {
+        if (value instanceof String s) {
+            return new StringLiteralExpr(s);
+        }
+        if (isBoxedCoreScalar(value)) {
+            return Reflect.createLiteralExpression(value);
+        }
+        if (value instanceof Short || value instanceof Byte) {
+            // Keep byte/short cast formatting consistent with createOptionalValueExpression.
+            return createOptionalValueExpression(value);
+        }
+        if (result.getType() != null && result.getType().isPrimitiveType()) {
+            return Reflect.createLiteralExpression(value);
+        }
+        return null;
+    }
+
+    private static boolean isBoxedCoreScalar(Object value) {
+        return value instanceof Integer
+                || value instanceof Long
+                || value instanceof Double
+                || value instanceof Float
+                || value instanceof Boolean
+                || value instanceof Character;
     }
 
     private void addCapturedOutputAssert(MethodResponse response, BlockStmt body) {
