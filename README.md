@@ -88,7 +88,7 @@ antikythera-test-generator/
 - Java 21
 - Maven
 - The `antikythera` core library installed locally (`mvn install` in `../antikythera/`)
-- VM argument: `--add-opens java.base/java.util.stream=ALL-UNNAMED`
+- VM arguments: `-XX:+EnableDynamicAgentLoading`, `--add-opens java.base/java.nio.charset=ALL-UNNAMED`, `--add-opens java.base/java.lang=ALL-UNNAMED`, `--add-opens java.base/java.util.stream=ALL-UNNAMED`
 
 ### Build
 
