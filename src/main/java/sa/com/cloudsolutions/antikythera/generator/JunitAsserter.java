@@ -57,6 +57,13 @@ public class JunitAsserter extends Asserter {
             }
             exceptionClass = actual.getClass().getName();
         }
+        /*
+         * Gson failures are sensitive to mock depth; symbolic evaluation may predict JsonIOException
+         * while a well-stubbed test runs cleanly. Prefer assertDoesNotThrow for Gson-related types.
+         */
+        if (exceptionClass.contains("JsonIOException") || exceptionClass.contains("gson.JsonSyntaxException")) {
+            return assertDoesNotThrow(invocation.replace(';', ' '));
+        }
         assertThrows.addArgument(exceptionClass + ".class");
         assertThrows.addArgument(String.format("() -> %s", invocation.replace(';', ' ')));
         return assertThrows;

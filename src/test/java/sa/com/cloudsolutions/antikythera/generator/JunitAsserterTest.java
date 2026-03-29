@@ -81,6 +81,22 @@ class JunitAsserterTest {
                 expr.toString());
     }
 
+    /**
+     * Gson-related failures are mapped to assertDoesNotThrow so generated tests stay stable when
+     * mocks change whether Gson throws vs. the method completing.
+     */
+    @Test
+    void assertThrowsUsesAssertDoesNotThrowWhenExceptionLooksLikeGsonIo() {
+        MethodResponse response = new MethodResponse();
+        response.setException(new EvaluatorException("wrap", new JsonIOException()));
+
+        Expression expr = asserter.assertThrows("someMethod();", response);
+        assertEquals("assertDoesNotThrow(() -> someMethod())", expr.toString());
+    }
+
+    private static final class JsonIOException extends RuntimeException {
+    }
+
     @Test
     void fieldAssertionWithStringValueGeneratesCorrectExpression() {
         Variable v = new Variable("bada");

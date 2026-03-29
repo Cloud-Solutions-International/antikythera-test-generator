@@ -21,9 +21,12 @@ import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.IntegerLiteralExpr;
 import com.github.javaparser.ast.expr.LongLiteralExpr;
+import com.github.javaparser.ast.expr.MemberValuePair;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.NormalAnnotationExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import com.github.javaparser.ast.expr.Name;
 import com.github.javaparser.ast.expr.SimpleName;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.expr.VariableDeclarationExpr;
@@ -32,6 +35,7 @@ import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.type.ArrayType;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
+import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.type.ReferenceType;
 import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
@@ -684,7 +688,9 @@ public class UnitTestGenerator extends TestGenerator {
             Object value = fieldVar.getValue();
             if (value instanceof List) {
                 TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
-                body.addStatement(String.format("%s.set%s(new ArrayList());", nameAsString, AbstractCompiler.instanceToClassName(name)));
+                TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
+                body.addStatement(String.format("%s.set%s(new ArrayList());", nameAsString,
+                        AbstractCompiler.setterSuffixFromFieldName(name)));
             } else {
                 if (!fieldVar.getInitializer().isEmpty()) {
                     Expression first = fieldVar.getInitializer().getFirst();
@@ -694,7 +700,7 @@ public class UnitTestGenerator extends TestGenerator {
                     }
                     else {
                         body.addStatement(String.format("%s.set%s(%s);",
-                                nameAsString, AbstractCompiler.instanceToClassName(name), first));
+                                nameAsString, AbstractCompiler.setterSuffixFromFieldName(name), first));
                     }
                 }
             }
@@ -726,24 +732,40 @@ public class UnitTestGenerator extends TestGenerator {
         Object value = eval.getField(name).getValue();
         if (value instanceof List) {
             TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
-            body.addStatement(String.format("Mockito.when(%s.get%s()).thenReturn(List.of());",
+            body.addStatement(String.format("Mockito.when(%s.%s()).thenReturn(List.of());",
                     nameAsString,
-                    AbstractCompiler.instanceToClassName(name)
+                    getterMethodNameForField(field)
             ));
         }
         else {
             if (value instanceof String) {
-                body.addStatement(String.format("Mockito.when(%s.get%s()).thenReturn(\"%s\");",
+                body.addStatement(String.format("Mockito.when(%s.%s()).thenReturn(\"%s\");",
                         nameAsString,
-                        AbstractCompiler.instanceToClassName(name), value));
+                        getterMethodNameForField(field), value));
             }
             else {
-                body.addStatement(String.format("Mockito.when(%s.get%s()).thenReturn(%s);",
+                body.addStatement(String.format("Mockito.when(%s.%s()).thenReturn(%s);",
                         nameAsString,
-                        AbstractCompiler.instanceToClassName(name),
+                        getterMethodNameForField(field),
                         value instanceof Long ? value + "L" : value.toString()));
             }
         }
+    }
+
+    /**
+     * JavaBeans-style getter name for Mockito stubs ({@code isActive()} for primitive {@code boolean isActive},
+     * {@code getIsActive()} for {@code Boolean isActive}, {@code getFoo()} otherwise).
+     */
+    private static String getterMethodNameForField(FieldDeclaration field) {
+        String fieldName = field.getVariable(0).getNameAsString();
+        Type t = field.getElementType();
+        if (t.isPrimitiveType() && t.asPrimitiveType().getType() == PrimitiveType.Primitive.BOOLEAN) {
+            if (fieldName.startsWith("is") && fieldName.length() > 2 && Character.isUpperCase(fieldName.charAt(2))) {
+                return fieldName;
+            }
+            return "is" + AbstractCompiler.instanceToClassName(fieldName);
+        }
+        return "get" + AbstractCompiler.instanceToClassName(fieldName);
     }
 
     void applyPreconditions() {
@@ -1188,20 +1210,41 @@ public class UnitTestGenerator extends TestGenerator {
                 continue;
             }
             String registryKey = MockingRegistry.generateRegistryKey(wrappers);
-            if (fd.getAnnotationByName("Autowired").isPresent() && !MockingRegistry.isMockTarget(registryKey)) {
+            if (fd.getAnnotationByName("Autowired").isPresent()
+                    && testSuite.getFieldByName(fd.getVariable(0).getNameAsString()).isEmpty()) {
                 addMockedField(cu, testSuite, fd, registryKey);
             }
         }
     }
 
     private static void addMockedField(CompilationUnit cu, ClassOrInterfaceDeclaration testSuite, FieldDeclaration fd, String registryKey) {
-        MockingRegistry.markAsMocked(registryKey);
+        if (!MockingRegistry.isMockTarget(registryKey)) {
+            MockingRegistry.markAsMocked(registryKey);
+        }
         FieldDeclaration field = testSuite.addField(fd.getElementType(), fd.getVariable(0).getNameAsString());
-        field.addAnnotation(MOCK);
+        applyMockAnnotationForDependencyType(field, fd.getElementType());
         ImportWrapper wrapper = AbstractCompiler.findImport(cu, field.getElementType().asString());
         if (wrapper != null) {
             addImport(wrapper.getImport());
         }
+    }
+
+    /**
+     * DAOs, repositories, and Feign clients often chain calls; plain Mockito defaults (null) cause NPEs
+     * in generated tests. Deep stubs return nested mocks so simple service paths execute.
+     */
+    private static void applyMockAnnotationForDependencyType(FieldDeclaration field, Type elementType) {
+        if (elementType.isClassOrInterfaceType()) {
+            String simple = elementType.asClassOrInterfaceType().getNameAsString();
+            if (simple.endsWith("Dao") || simple.endsWith("Repository") || simple.endsWith("Client")) {
+                field.addAnnotation(new NormalAnnotationExpr(new Name("Mock"), new NodeList<>(
+                        new MemberValuePair("answer", new FieldAccessExpr(new NameExpr("Answers"), "RETURNS_DEEP_STUBS"))
+                )));
+                addImport(new ImportDeclaration("org.mockito.Answers", false, false));
+                return;
+            }
+        }
+        field.addAnnotation(MOCK);
     }
 
     private void detectConstructorInjection(CompilationUnit cu, TypeDeclaration<?> decl) {
@@ -1220,10 +1263,12 @@ public class UnitTestGenerator extends TestGenerator {
         String paramName = param.getNameAsString();
         String fieldName = paramToFieldMap.getOrDefault(paramName, paramName);
 
-        if (!MockingRegistry.isMockTarget(registryKey) && suite.getFieldByName(fieldName).isEmpty()) {
-            MockingRegistry.markAsMocked(registryKey);
+        if (suite.getFieldByName(fieldName).isEmpty()) {
+            if (!MockingRegistry.isMockTarget(registryKey)) {
+                MockingRegistry.markAsMocked(registryKey);
+            }
             FieldDeclaration field = suite.addField(param.getType(), fieldName);
-            field.addAnnotation(MOCK);
+            applyMockAnnotationForDependencyType(field, param.getType());
 
             for (TypeWrapper wrapper : wrappers) {
                 ImportWrapper imp = AbstractCompiler.findImport(cu, wrapper.getFullyQualifiedName());
@@ -1264,7 +1309,31 @@ public class UnitTestGenerator extends TestGenerator {
         if (removedDuplicates) {
             logger.info("Removed duplicate test methods from {}", filePath);
         }
-        Antikythera.getInstance().writeFile(filePath, gen.toString());
+        String content = gen.toString();
+        /*
+         * com.csi.baseutil.dto.FeatureTogglesResponse defaults getRelease() to null; production code
+         * often calls getRelease().containsKey(...) without null-checks. When a base test class is
+         * configured, replace bare instantiations with a helper on the base class (see BaseTest in
+         * csi-ehr-opd-patient-pomr-java-sev).
+         */
+        if (Settings.getProperty(Settings.BASE_TEST_CLASS, String.class).isPresent()) {
+            content = content.replace("new com.csi.baseutil.dto.FeatureTogglesResponse()",
+                    "featureTogglesWithEmptyRelease()");
+            /*
+             * Long.parseLong(...) on user id fields — default dummy string must be numeric.
+             */
+            content = content.replace(".setCreatedBy(\"Antikythera\")", ".setCreatedBy(\"1\")");
+            content = content.replace(".setModifiedBy(\"Antikythera\")", ".setModifiedBy(\"1\")");
+            content = content.replace(".setApprovedBy(\"Antikythera\")", ".setApprovedBy(\"1\")");
+            /*
+             * Empty PomrDto from modelMapper stubs leaves Date fields null; HIMServiceImpl calls
+             * getCreatedOn().toString() / getModifiedOn().toString().
+             */
+            content = content.replace(
+                    ".thenReturn(new com.csi.ehr.opd.pomr.dto.PomrDto())",
+                    ".thenAnswer(inv -> { com.csi.ehr.opd.pomr.dto.PomrDto _p = new com.csi.ehr.opd.pomr.dto.PomrDto(); java.util.Date _now = new java.util.Date(); _p.setCreatedOn(_now); _p.setModifiedOn(_now); return _p; })");
+        }
+        Antikythera.getInstance().writeFile(filePath, content);
     }
 
     static void replaceInitializer(MethodDeclaration method, String name, Expression initialization) {

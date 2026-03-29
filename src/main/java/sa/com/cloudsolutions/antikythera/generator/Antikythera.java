@@ -98,6 +98,9 @@ public class Antikythera {
     }
 
     public static void main(String[] args) throws IOException, XmlPullParserException, EvaluatorException {
+        if (args.length > 0 && !args[0].isBlank()) {
+            Settings.loadConfigMap(new File(args[0].trim()));
+        }
         Antikythera antk = Antikythera.getInstance();
         antk.preProcess();
         antk.generateApiTests();
