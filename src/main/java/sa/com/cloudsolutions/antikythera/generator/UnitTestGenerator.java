@@ -1310,29 +1310,6 @@ public class UnitTestGenerator extends TestGenerator {
             logger.info("Removed duplicate test methods from {}", filePath);
         }
         String content = gen.toString();
-        /*
-         * com.csi.baseutil.dto.FeatureTogglesResponse defaults getRelease() to null; production code
-         * often calls getRelease().containsKey(...) without null-checks. When a base test class is
-         * configured, replace bare instantiations with a helper on the base class (see BaseTest in
-         * csi-ehr-opd-patient-pomr-java-sev).
-         */
-        if (Settings.getProperty(Settings.BASE_TEST_CLASS, String.class).isPresent()) {
-            content = content.replace("new com.csi.baseutil.dto.FeatureTogglesResponse()",
-                    "featureTogglesWithEmptyRelease()");
-            /*
-             * Long.parseLong(...) on user id fields — default dummy string must be numeric.
-             */
-            content = content.replace(".setCreatedBy(\"Antikythera\")", ".setCreatedBy(\"1\")");
-            content = content.replace(".setModifiedBy(\"Antikythera\")", ".setModifiedBy(\"1\")");
-            content = content.replace(".setApprovedBy(\"Antikythera\")", ".setApprovedBy(\"1\")");
-            /*
-             * Empty PomrDto from modelMapper stubs leaves Date fields null; HIMServiceImpl calls
-             * getCreatedOn().toString() / getModifiedOn().toString().
-             */
-            content = content.replace(
-                    ".thenReturn(new com.csi.ehr.opd.pomr.dto.PomrDto())",
-                    ".thenAnswer(inv -> { com.csi.ehr.opd.pomr.dto.PomrDto _p = new com.csi.ehr.opd.pomr.dto.PomrDto(); java.util.Date _now = new java.util.Date(); _p.setCreatedOn(_now); _p.setModifiedOn(_now); return _p; })");
-        }
         Antikythera.getInstance().writeFile(filePath, content);
     }
 
@@ -1388,18 +1365,18 @@ public class UnitTestGenerator extends TestGenerator {
                 String scope = mce.getScope().get().toString();
                 if (scope.equals("List")) {
                     if (mce.getArguments().isEmpty()) {
-                        return StaticJavaParser.parseExpression("new ArrayList<>()");
+                        return StaticJavaParser.parseExpression("new java.util.ArrayList<>()");
                     } else {
                         return StaticJavaParser.parseExpression(
-                                String.format("new ArrayList<>(java.util.Arrays.asList(%s))", mce.getArgument(0)));
+                                String.format("new java.util.ArrayList<>(java.util.Arrays.asList(%s))", mce.getArgument(0)));
                     }
                 }
                 if (scope.equals("Set")) {
                     if (mce.getArguments().isEmpty()) {
-                        return StaticJavaParser.parseExpression("new HashSet<>()");
+                        return StaticJavaParser.parseExpression("new java.util.HashSet<>()");
                     } else {
                         return StaticJavaParser.parseExpression(
-                                String.format("new HashSet<>(java.util.Arrays.asList(%s))", mce.getArgument(0)));
+                                String.format("new java.util.HashSet<>(java.util.Arrays.asList(%s))", mce.getArgument(0)));
                     }
                 }
             }
