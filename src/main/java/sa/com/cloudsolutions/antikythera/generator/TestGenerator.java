@@ -94,7 +94,12 @@ public abstract class TestGenerator implements ITestGenerator {
         }
 
         if (testMethodNames.contains(testName)) {
-            testName += "_" + (char)('A' + testMethodNames.size()  % 26 );
+            String base = testName;
+            int counter = testMethodNames.size();
+            do {
+                testName = base + "_" + (char) ('A' + counter % 26);
+                counter++;
+            } while (testMethodNames.contains(testName));
         }
         testMethodNames.add(testName);
         return testName;

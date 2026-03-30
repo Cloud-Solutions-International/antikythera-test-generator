@@ -102,6 +102,14 @@ public class UnitTestGenerator extends TestGenerator {
      */
     private final Map<String, Boolean> variables = new HashMap<>();
 
+    /**
+     * Maps simple type name → field name for non-mock protected/public fields declared in the
+     * base test class (e.g. "Tenant" → "tenant", "MetaData" → "metaData").
+     * Populated when the base class is loaded; used by {@link #tryUseBaseClassField} to emit
+     * {@code Type paramName = this.fieldName;} instead of constructing a new instance.
+     */
+    private final Map<String, String> baseClassFields = new HashMap<>();
+
     public UnitTestGenerator(CompilationUnit cu) {
         super(cu);
         String packageDecl = cu.getPackageDeclaration().map(PackageDeclaration::getNameAsString).orElse("");
@@ -141,6 +149,45 @@ public class UnitTestGenerator extends TestGenerator {
             }
         }
 
+    }
+
+    /**
+     * Collects non-@Mock protected/public fields from a base test class type declaration
+     * into {@link #baseClassFields} (simple type name → field name).
+     * Called once per type when the base class is loaded.
+     */
+    private void extractBaseClassFields(TypeDeclaration<?> t) {
+        for (FieldDeclaration fd : t.getFields()) {
+            if (fd.getAnnotationByName(MOCK).isPresent() || fd.getAnnotationByName(MOCK_BEAN).isPresent()) {
+                continue;
+            }
+            if (fd.hasModifier(Modifier.Keyword.PROTECTED) || fd.hasModifier(Modifier.Keyword.PUBLIC)) {
+                String simpleType = fd.getElementType().asString();
+                String fieldName = fd.getVariable(0).getNameAsString();
+                baseClassFields.put(simpleType, fieldName);
+            }
+        }
+    }
+
+    /**
+     * If the base test class declares a non-mock protected/public field whose simple type
+     * matches {@code param}'s type, emits {@code Type paramName = this.fieldName;} and returns
+     * {@code true}. The caller should then skip normal mock generation for this parameter.
+     */
+    private boolean tryUseBaseClassField(Parameter param) {
+        if (baseClassFields.isEmpty()) {
+            return false;
+        }
+        String simpleType = param.getType().isClassOrInterfaceType()
+                ? param.getType().asClassOrInterfaceType().getNameAsString()
+                : param.getType().asString();
+        String fieldName = baseClassFields.get(simpleType);
+        if (fieldName == null) {
+            return false;
+        }
+        getBody(testMethod).addStatement(
+                String.format("%s %s = this.%s;", simpleType, param.getNameAsString(), fieldName));
+        return true;
     }
 
     /**
@@ -236,6 +283,7 @@ public class UnitTestGenerator extends TestGenerator {
             baseTestClass = StaticJavaParser.parse(new File(helperPath));
             for (TypeDeclaration<?> t : baseTestClass.getTypes()) {
                 identifyExistingMocks(t);
+                extractBaseClassFields(t);
             }
 
             baseTestClass.findFirst(MethodDeclaration.class,
@@ -475,6 +523,9 @@ public class UnitTestGenerator extends TestGenerator {
                 (paramType.isClassOrInterfaceType() && paramType.asClassOrInterfaceType().isBoxedType())) {
             mockSimpleArgument(param, nameAsString, paramType);
         } else {
+            if (tryUseBaseClassField(param)) {
+                return;
+            }
             addClassImports(paramType);
             Variable v = argumentGenerator.getArguments().get(nameAsString);
             if (v != null) {

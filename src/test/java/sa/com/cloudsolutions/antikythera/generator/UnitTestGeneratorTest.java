@@ -669,6 +669,21 @@ class UnitTestGeneratorMoreTests extends TestHelper {
     }
 
     /**
+     * When a method parameter's type matches a non-@Mock protected field in the base test
+     * class, mockArgument should emit {@code Type paramName = this.fieldName;} rather than
+     * constructing a new instance.
+     */
+    @Test
+    void testMockArgumentUsesBaseClassField() {
+        MethodDeclaration md = setupMethod(CONDITIONAL, "conditional1");
+        unitTestGenerator.mockArguments();
+
+        String body = unitTestGenerator.testMethod.getBody().orElseThrow().toString();
+        assertTrue(body.contains("Person person = this.person"),
+                "Expected 'Person person = this.person' but was:\n" + body);
+    }
+
+    /**
      * The base class should be added to the class under test.
      */
     @Test
