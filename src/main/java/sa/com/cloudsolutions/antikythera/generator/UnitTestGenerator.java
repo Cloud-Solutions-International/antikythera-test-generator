@@ -192,6 +192,8 @@ public class UnitTestGenerator extends TestGenerator {
         if (fieldName == null) {
             return false;
         }
+        // Add import for the parameter type before using it
+        addClassImports(param.getType());
         getBody(testMethod).addStatement(
                 String.format("%s %s = this.%s;", simpleType, param.getNameAsString(), fieldName));
         return true;
