@@ -48,6 +48,7 @@ import sa.com.cloudsolutions.antikythera.depsolver.Graph;
 import sa.com.cloudsolutions.antikythera.evaluator.AntikytheraRunTime;
 import sa.com.cloudsolutions.antikythera.evaluator.ArgumentGenerator;
 import sa.com.cloudsolutions.antikythera.evaluator.Evaluator;
+import sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext;
 import sa.com.cloudsolutions.antikythera.evaluator.Precondition;
 import sa.com.cloudsolutions.antikythera.evaluator.Reflect;
 import sa.com.cloudsolutions.antikythera.evaluator.TestSuiteEvaluator;
@@ -109,6 +110,12 @@ public class UnitTestGenerator extends TestGenerator {
      * {@code Type paramName = this.fieldName;} instead of constructing a new instance.
      */
     private final Map<String, String> baseClassFields = new HashMap<>();
+
+    /**
+     * Analyzer for determining if test arguments will trigger exceptions.
+     * Used to avoid generating assertThrows when exceptions won't actually occur.
+     */
+    private final ExceptionAnalyzer exceptionAnalyzer = new ExceptionAnalyzer();
 
     public UnitTestGenerator(CompilationUnit cu) {
         super(cu);
@@ -334,9 +341,83 @@ public class UnitTestGenerator extends TestGenerator {
                 }
             }
         } else {
+            handleExceptionResponse(response, invocation);
+        }
+    }
+
+    /**
+     * Handle exception responses with smart analysis.
+     * Checks if test arguments will actually trigger the exception before adding assertThrows.
+     * 
+     * @param response The method response containing exception context
+     * @param invocation The method invocation string
+     */
+    private void handleExceptionResponse(MethodResponse response, String invocation) {
+        ExceptionContext ctx = response.getExceptionContext();
+        
+        // Debug logging
+        logger.debug("handleExceptionResponse: ctx={}, exception={}", 
+            ctx != null, ctx != null ? ctx.getException() : null);
+        
+        // Fallback for backward compatibility - if no context, use old behavior
+        if (ctx == null || ctx.getException() == null) {
+            logger.warn("No exception context available, using legacy assertThrows behavior");
+            String[] parts = invocation.split("=");
+            assertThrows(parts.length == 2 ? parts[1] : parts[0], response);
+            return;
+        }
+        
+        // Analyze the exception type
+        ExceptionType type = exceptionAnalyzer.analyzeException(ctx, 
+            methodUnderTest instanceof MethodDeclaration ? (MethodDeclaration) methodUnderTest : null);
+        
+        logger.debug("Exception type analyzed as: {}", type);
+        
+        // Extract current test arguments
+        Map<String, Expression> currentArgs = extractTestArguments();
+        
+        logger.debug("Extracted {} test arguments", currentArgs.size());
+        
+        // Check if arguments will trigger exception
+        boolean willTrigger = exceptionAnalyzer.willArgumentsTriggerException(ctx, currentArgs);
+        
+        logger.info("Exception analysis for {}: type={}, willTrigger={}", 
+            methodUnderTest.getNameAsString(), type, willTrigger);
+        
+        if (!willTrigger) {
+            // Exception won't trigger with current arguments - skip assertThrows
+            logger.info("Skipping assertThrows for {} - arguments won't trigger {} exception",
+                methodUnderTest.getNameAsString(), type);
+            // Instead, generate a normal success-path test
+            addAsserts(response, invocation);
+        } else {
+            // Exception will trigger - use normal assertThrows behavior
+            logger.debug("Generating assertThrows for {} - exception will be triggered", 
+                methodUnderTest.getNameAsString());
             String[] parts = invocation.split("=");
             assertThrows(parts.length == 2 ? parts[1] : parts[0], response);
         }
+    }
+    
+    /**
+     * Extract test arguments from the current test method.
+     * Maps parameter names to their initialization expressions.
+     * 
+     * @return Map of parameter name to initialization expression
+     */
+    private Map<String, Expression> extractTestArguments() {
+        Map<String, Expression> args = new HashMap<>();
+        
+        // Find variable declarations in the test method
+        testMethod.findAll(VariableDeclarationExpr.class).forEach(varDecl -> {
+            for (VariableDeclarator var : varDecl.getVariables()) {
+                var.getInitializer().ifPresent(init -> {
+                    args.put(var.getNameAsString(), init);
+                });
+            }
+        });
+        
+        return args;
     }
 
     void addDependencies() {
