@@ -356,8 +356,10 @@ public class UnitTestGenerator extends TestGenerator {
         ExceptionContext ctx = response.getExceptionContext();
         
         // Debug logging
-        logger.debug("handleExceptionResponse: ctx={}, exception={}", 
-            ctx != null, ctx != null ? ctx.getException() : null);
+        logger.info("handleExceptionResponse: ctx={}, exception={}, insideLoop={}, loopContext={}", 
+            ctx != null, ctx != null ? ctx.getException() : null,
+            ctx != null ? ctx.isInsideLoop() : "N/A",
+            ctx != null && ctx.getLoopContext() != null ? "YES" : "NO");
         
         // Fallback for backward compatibility - if no context, use old behavior
         if (ctx == null || ctx.getException() == null) {
@@ -371,7 +373,8 @@ public class UnitTestGenerator extends TestGenerator {
         ExceptionType type = exceptionAnalyzer.analyzeException(ctx, 
             methodUnderTest instanceof MethodDeclaration ? (MethodDeclaration) methodUnderTest : null);
         
-        logger.debug("Exception type analyzed as: {}", type);
+        logger.info("Exception type analyzed as: {} (insideLoop={}, hasLoopContext={})", 
+            type, ctx.isInsideLoop(), ctx.getLoopContext() != null);
         
         // Extract current test arguments
         Map<String, Expression> currentArgs = extractTestArguments();
