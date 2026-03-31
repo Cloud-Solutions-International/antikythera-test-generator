@@ -1,0 +1,38 @@
+variables:
+  ehr_root: /home/raditha/csi/repos/EHR-OPD/csi-ehr-opd-patient-pomr-java-sev
+  m2_folder: ${HOME}/.m2/repository
+
+# ── Source under test ──────────────────────────────────────────────────────────
+base_path: ${ehr_root}/src/main/java
+base_package: com.csi.ehr.opd.pomr
+
+# ── Generated test output ──────────────────────────────────────────────────────
+output_path: ${ehr_root}/src/test/java
+
+# ── Services to generate unit tests for ───────────────────────────────────────
+services:
+  - com.csi.ehr.opd.pomr.service.impl.aud.AudServiceImpl
+  - com.csi.ehr.opd.pomr.service.impl.chiefcomplain.ChiefComplainServiceImpl
+  - com.csi.ehr.opd.pomr.service.impl.episode.EpisodeServiceImpl
+  - com.csi.ehr.opd.pomr.service.impl.him.HIMServiceImpl
+  - com.csi.ehr.opd.pomr.service.impl.infectedicd.InfectedIcdServiceImpl
+  - com.csi.ehr.opd.pomr.service.impl.nurseproblem.NurseProblemServiceImpl
+  - com.csi.ehr.opd.pomr.service.impl.patientmerge.PatientMergeDetailsServiceImpl
+  - com.csi.ehr.opd.pomr.service.impl.pomr.PomrServiceImpl
+  - com.csi.ehr.opd.pomr.service.impl.problem.ProblemServiceImpl
+  - com.csi.ehr.opd.pomr.service.impl.visitHistory.VisitHistoryServiceImpl
+
+# ── Test framework ─────────────────────────────────────────────────────────────
+test_framework: junit
+mock_with: Mockito
+
+# ── Test class customisation ───────────────────────────────────────────────────
+base_test_class: com.csi.ehr.opd.pomr.BaseTest
+
+# ── Void method testing via logs ───────────────────────────────────────────────
+skip_void_no_side_effects: false
+log_appender: com.csi.ehr.opd.pomr.LogAppender
+
+# ── Dependencies ───────────────────────────────────────────────────────────────
+dependencies:
+  on_error: log
