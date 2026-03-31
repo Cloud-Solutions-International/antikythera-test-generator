@@ -64,14 +64,17 @@ import sa.com.cloudsolutions.antikythera.parser.ImportWrapper;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * <p>Unit test generator.</p>
@@ -443,7 +446,7 @@ public class UnitTestGenerator extends TestGenerator {
         }
         clearWhenThen();
     }
-
+    
     private void identifyVariables() {
         variables.clear();
         testMethod.accept(new VoidVisitorAdapter<Map<String, Boolean>>() {
@@ -574,7 +577,6 @@ public class UnitTestGenerator extends TestGenerator {
         if (testClass == null) {
             testClass = testMethod.findAncestor(ClassOrInterfaceDeclaration.class).orElseThrow();
         }
-        addImport(new ImportDeclaration("org.mockito.InjectMocks", false, false));
 
         if (!autoWired) {
             for (FieldDeclaration fd : testClass.getFields()) {
@@ -589,8 +591,7 @@ public class UnitTestGenerator extends TestGenerator {
             instanceName = AbstractCompiler.classToInstanceName(classUnderTest.getNameAsString());
 
             if (testClass.getFieldByName(classUnderTest.getNameAsString()).isEmpty()) {
-                FieldDeclaration fd = testClass.addField(classUnderTest.getNameAsString(), instanceName);
-                fd.addAnnotation("InjectMocks");
+                testClass.addField(classUnderTest.getNameAsString(), instanceName);
             }
             autoWired = true;
         }
@@ -1227,6 +1228,64 @@ public class UnitTestGenerator extends TestGenerator {
         throw new UnsupportedOperationException("Not needed here");
     }
 
+    /**
+     * Generate service instance creation and ReflectionTestUtils.setField() calls to inject all mocked fields.
+     * This approach guarantees field injection works even with duplicate field types (e.g., two PatientPOMRDao fields).
+     */
+    private void injectMockedFieldsViaReflection(BlockStmt beforeBody) {
+        // Find the service class name from the compilation unit being tested
+        String serviceClassName = null;
+        
+        for (TypeDeclaration<?> type : compilationUnitUnderTest.getTypes()) {
+            if (type.isAnnotationPresent("Service") || type.isAnnotationPresent("org.springframework.stereotype.Service")) {
+                serviceClassName = type.getNameAsString();
+                break;
+            }
+        }
+        
+        if (serviceClassName == null) {
+            return;
+        }
+        
+        String serviceInstanceName = AbstractCompiler.classToInstanceName(serviceClassName);
+        
+        // Find all mocked fields from gen (test class CompilationUnit)
+        List<String> mockedFieldNames = new ArrayList<>();
+        for (TypeDeclaration<?> testType : gen.getTypes()) {
+            for (FieldDeclaration field : testType.getFields()) {
+                boolean hasMockAnnotation = field.getAnnotations().stream()
+                        .anyMatch(ann -> ann.getNameAsString().equals("Mock") || ann.getNameAsString().equals("MockBean"));
+                
+                if (hasMockAnnotation) {
+                    mockedFieldNames.add(field.getVariable(0).getNameAsString());
+                }
+            }
+        }
+        
+        if (mockedFieldNames.isEmpty()) {
+            return;
+        }
+        
+        // Instantiate the service: serviceInstance = new ServiceClass();
+        ObjectCreationExpr newInstance = new ObjectCreationExpr(null, new ClassOrInterfaceType(serviceClassName), new NodeList<>());
+        AssignExpr instantiation = new AssignExpr(new NameExpr(serviceInstanceName), newInstance, AssignExpr.Operator.ASSIGN);
+        beforeBody.addStatement(instantiation);
+        
+        // Generate setField calls for each mocked field
+        for (String fieldName : mockedFieldNames) {
+            MethodCallExpr setFieldCall = new MethodCallExpr(
+                new NameExpr("ReflectionTestUtils"),
+                "setField",
+                new NodeList<>(
+                    new NameExpr(serviceInstanceName),
+                    new StringLiteralExpr(fieldName),
+                    new NameExpr(fieldName)
+                )
+            );
+            beforeBody.addStatement(setFieldCall);
+        }
+    }
+
     @Override
     public void addBeforeClass() {
         identifyFieldsToBeMocked();
@@ -1239,6 +1298,10 @@ public class UnitTestGenerator extends TestGenerator {
         BlockStmt beforeBody = new BlockStmt();
         before.setBody(beforeBody);
         beforeBody.addStatement("MockitoAnnotations.openMocks(this);");
+        
+        // Inject all mocked fields using ReflectionTestUtils for guaranteed injection
+        injectMockedFieldsViaReflection(beforeBody);
+        
         beforeBody.addStatement("originalOut = System.out;");
         beforeBody.addStatement("System.setOut(new PrintStream(outputStream));");
         before.setJavadocComment(AUTHOR_ANTIKYTHERA);
@@ -1304,6 +1367,7 @@ public class UnitTestGenerator extends TestGenerator {
         addImport(new ImportDeclaration("org.junit.jupiter.api.BeforeEach", false, false));
         addImport(new ImportDeclaration("org.mockito.Mock", false, false));
         addImport(new ImportDeclaration("org.mockito.Mockito", false, false));
+        addImport(new ImportDeclaration("org.springframework.test.util.ReflectionTestUtils", false, false));
 
         for (Map.Entry<String, CompilationUnit> entry : Graph.getDependencies().entrySet()) {
             CompilationUnit cu = entry.getValue();
