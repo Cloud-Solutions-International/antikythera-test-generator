@@ -2,6 +2,7 @@ package sa.com.cloudsolutions.antikythera.generator;
 
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.NullLiteralExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.stmt.IfStmt;
 import com.github.javaparser.ast.stmt.Statement;
@@ -114,6 +115,15 @@ public class ExceptionAnalyzer {
      */
     public boolean willArgumentsTriggerException(ExceptionContext ctx, Map<String, Expression> testArgs) {
         if (ctx == null) {
+            return false;
+        }
+
+        // NullPointerException is often an evaluator artefact caused by Reflect.getDefault()
+        // returning null for object types during symbolic tracing.  At runtime the Mockito mocks
+        // return non-null values, so the NPE never materialises.  Only assert assertThrows(NPE)
+        // when the generated test explicitly passes a null literal as an argument.
+        if (isNullPointerException(ctx) && !testArgsContainNullLiteral(testArgs)) {
+            logger.debug("Suppressing assertThrows(NPE) — no explicit null literal in test arguments (likely evaluator artefact)");
             return false;
         }
 
@@ -268,9 +278,42 @@ public class ExceptionAnalyzer {
 
         // For now, we just identify the problem - actual fixing will be done
         // in Phase 3 when we integrate with test generation
-        logger.info("Collection parameter '{}' needs non-empty invalid data to trigger exception", 
+        logger.info("Collection parameter '{}' needs non-empty invalid data to trigger exception",
                    collectionParamName);
-        
+
         return null; // Phase 3 will implement actual fixing
+    }
+
+    /**
+     * Returns true if the exception stored in ctx (after unwrapping wrapper types) is
+     * a NullPointerException.
+     */
+    private boolean isNullPointerException(ExceptionContext ctx) {
+        Exception ex = ctx.getException();
+        if (ex == null) {
+            return false;
+        }
+        Throwable t = ex;
+        while (t != null) {
+            if (t instanceof NullPointerException) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if any of the test-method argument expressions is a null literal
+     * (e.g. {@code Long id = null;}).  Such explicit nulls indicate that the developer
+     * intentionally passes null; the NPE is therefore genuine, not an evaluator artefact.
+     */
+    private boolean testArgsContainNullLiteral(Map<String, Expression> testArgs) {
+        for (Expression expr : testArgs.values()) {
+            if (expr instanceof NullLiteralExpr) {
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -29,6 +29,7 @@ import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.Name;
 import com.github.javaparser.ast.expr.SimpleName;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
+import com.github.javaparser.ast.expr.NullLiteralExpr;
 import com.github.javaparser.ast.expr.VariableDeclarationExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
@@ -393,6 +394,23 @@ public class UnitTestGenerator extends TestGenerator {
             methodUnderTest.getNameAsString(), type, willTrigger);
         
         if (!willTrigger) {
+            // Before treating as success-path, verify the suppression is safe:
+            // 1. If the test has NO mock stubs at all, the NPE likely comes from a plain
+            //    @Mock() returning null — that null is real at runtime, so keep assertThrows.
+            // 2. If the test has explicit thenReturn(null) stubs, the null is intentional;
+            //    dereferencing it causes a real NPE at runtime — keep assertThrows.
+            if (!hasWhenStubs()) {
+                logger.info("Reinstating assertThrows(NPE) for {} — test has no stubs; plain @Mock returns null at runtime",
+                    methodUnderTest.getNameAsString());
+                willTrigger = true;
+            } else if (hasNullThenReturnStubs()) {
+                logger.info("Reinstating assertThrows(NPE) for {} — test has explicit thenReturn(null) stub; null is real",
+                    methodUnderTest.getNameAsString());
+                willTrigger = true;
+            }
+        }
+
+        if (!willTrigger) {
             // Exception won't trigger with current arguments - skip assertThrows
             logger.info("Skipping assertThrows for {} - arguments won't trigger {} exception",
                 methodUnderTest.getNameAsString(), type);
@@ -426,6 +444,47 @@ public class UnitTestGenerator extends TestGenerator {
         });
         
         return args;
+    }
+
+    /**
+     * Returns true if the current test method already contains at least one Mockito.when(...)
+     * call.  If there are no stubs, the service's dependencies are plain @Mock fields that
+     * return null for any unstubbed invocation — any resulting NPE is real, not an artefact.
+     */
+    private boolean hasWhenStubs() {
+        return !testMethod.findAll(MethodCallExpr.class,
+            m -> m.getNameAsString().equals("when")).isEmpty();
+    }
+
+    /**
+     * Returns true if the current test method contains at least one
+     * {@code when(...).thenReturn(null)} stub AND contains NO non-null
+     * {@code thenReturn(...)} or {@code thenAnswer(...)} stubs.
+     *
+     * <p>A test where every stub is a null return is deliberately setting up a
+     * null-return path for the service; if the service dereferences that null the
+     * resulting NPE is intentional and real — not an evaluator artefact.
+     *
+     * <p>Tests that mix null and non-null stubs (e.g. a count returns 0L while a
+     * find returns null) use the null stub for a branch that may never be reached,
+     * so the NPE suppression should still apply for those tests.
+     */
+    private boolean hasNullThenReturnStubs() {
+        boolean hasNullReturn = false;
+        boolean hasNonNullReturn = false;
+        for (MethodCallExpr mce : testMethod.findAll(MethodCallExpr.class)) {
+            String name = mce.getNameAsString();
+            if (name.equals("thenReturn") && mce.getArguments().size() == 1) {
+                if (mce.getArgument(0) instanceof NullLiteralExpr) {
+                    hasNullReturn = true;
+                } else {
+                    hasNonNullReturn = true;
+                }
+            } else if (name.equals("thenAnswer")) {
+                hasNonNullReturn = true;
+            }
+        }
+        return hasNullReturn && !hasNonNullReturn;
     }
 
     void addDependencies() {

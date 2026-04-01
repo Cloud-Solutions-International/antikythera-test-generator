@@ -116,7 +116,7 @@ class UnitTestGeneratorTest {
         unitTestGenerator.createTests(methodUnderTest, new MethodResponse());
         String sources = unitTestGenerator.getCompilationUnit().toString();
         assertTrue(sources.contains("queries2Test"));
-        assertTrue(sources.contains("InjectMocks"));
+        assertTrue(sources.contains("ReflectionTestUtils"));
     }
 
     @Test
