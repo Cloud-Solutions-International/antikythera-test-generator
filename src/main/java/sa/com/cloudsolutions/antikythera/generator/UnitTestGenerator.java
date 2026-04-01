@@ -442,9 +442,51 @@ public class UnitTestGenerator extends TestGenerator {
             if (expr instanceof MethodCallExpr mce && skipWhenUsage(mce)) {
                 continue;
             }
+            expandInlineDtoCollectionFields(expr);
             getBody(testMethod).addStatement(expr);
         }
         clearWhenThen();
+    }
+
+    /**
+     * When a when().thenReturn(new XxxDto()) expression contains an inline object-creation
+     * whose class has declared Collection/List/Set/Map fields, extract the object into a local
+     * variable so that those fields can be initialised to empty collections before the when()
+     * statement is added to the test body.  This prevents NullPointerExceptions when the
+     * service under test calls .size() or iterates the list.
+     */
+    private void expandInlineDtoCollectionFields(Expression expr) {
+        if (!(expr instanceof MethodCallExpr thenReturn)
+                || !thenReturn.getNameAsString().equals("thenReturn")
+                || thenReturn.getArguments().isEmpty()
+                || !(thenReturn.getArgument(0) instanceof ObjectCreationExpr oce)) {
+            return;
+        }
+
+        String typeName = oce.getType().asString();
+        Optional<TypeDeclaration<?>> typeDecOpt = AntikytheraRunTime.getTypeDeclaration(typeName);
+        if (typeDecOpt.isEmpty()) {
+            return;
+        }
+
+        List<FieldDeclaration> collectionFields = typeDecOpt.get().getFields().stream()
+                .filter(f -> isCollectionType(f.getElementType()))
+                .toList();
+
+        if (collectionFields.isEmpty()) {
+            return;
+        }
+
+        String varName = Variable.generateVariableName(typeName);
+        BlockStmt body = getBody(testMethod);
+        body.addStatement(typeName + " " + varName + " = new " + typeName + "();");
+        for (FieldDeclaration field : collectionFields) {
+            String fieldName = field.getVariable(0).getNameAsString();
+            TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
+            body.addStatement(String.format("%s.set%s(new ArrayList());",
+                    varName, AbstractCompiler.setterSuffixFromFieldName(fieldName)));
+        }
+        thenReturn.setArgument(0, new NameExpr(varName));
     }
     
     private void identifyVariables() {
@@ -824,7 +866,7 @@ public class UnitTestGenerator extends TestGenerator {
         if (doesFieldNeedMocking(eval, name)) {
             Variable fieldVar = eval.getField(name);
             Object value = fieldVar.getValue();
-            if (value instanceof List) {
+            if (value instanceof List || (value == null && isCollectionType(fieldVar.getType()))) {
                 TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
                 TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
                 body.addStatement(String.format("%s.set%s(new ArrayList());", nameAsString,
@@ -853,11 +895,19 @@ public class UnitTestGenerator extends TestGenerator {
 
         Object value = f.getValue();
         if (value == null) {
-            return false;
+            return isCollectionType(f.getType());
         }
 
         return !(f.getType().isPrimitiveType() && f.getValue().equals(Reflect.getDefault(f.getClazz())));
 
+    }
+
+    private static boolean isCollectionType(Type type) {
+        String raw = type.asString().replaceAll("<.*>", "").trim();
+        return raw.equals("List") || raw.equals("ArrayList") || raw.equals("LinkedList")
+                || raw.equals("Set") || raw.equals("HashSet") || raw.equals("LinkedHashSet")
+                || raw.equals("Collection") || raw.equals("Map") || raw.equals("HashMap")
+                || raw.equals("LinkedHashMap");
     }
 
     private void mockFieldWithMockito(String nameAsString, Evaluator eval, FieldDeclaration field) {

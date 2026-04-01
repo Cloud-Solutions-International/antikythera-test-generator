@@ -73,7 +73,8 @@ public class JunitAsserter extends Asserter {
         return throwable instanceof InvocationTargetException
                 || throwable instanceof CompletionException
                 || throwable instanceof ExecutionException
-                || throwable instanceof sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
+                || throwable instanceof sa.com.cloudsolutions.antikythera.exception.EvaluatorException
+                || throwable instanceof sa.com.cloudsolutions.antikythera.exception.AUTException;
     }
 
 
