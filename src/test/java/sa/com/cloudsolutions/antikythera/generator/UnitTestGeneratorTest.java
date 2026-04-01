@@ -52,6 +52,7 @@ import java.io.PrintStream;
 import java.lang.reflect.Method;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -561,7 +562,13 @@ class UnitTestGeneratorMoreTests extends TestHelper {
 
         Evaluator evaluator = EvaluatorFactory.create(FAKE_SERVICE, SpringEvaluator.class);
         evaluator.visit(md);
-        assertTrue(outContent.toString().contains("Person: class sa.com.cloudsolutions.antikythera.evaluator.MockingEvaluator"));
+        Variable persons = evaluator.getField("persons");
+        assertNotNull(persons);
+        assertInstanceOf(Collection.class, persons.getValue());
+        Collection<?> mockedPersons = (Collection<?>) persons.getValue();
+        assertFalse(mockedPersons.isEmpty());
+        assertInstanceOf(sa.com.cloudsolutions.antikythera.evaluator.MockingEvaluator.class,
+                mockedPersons.iterator().next());
         assertTrue(unitTestGenerator.gen.toString().contains("@Mock()\n" +
                 "    List<IPerson> persons;"));
     }
