@@ -1064,17 +1064,10 @@ public class UnitTestGenerator extends TestGenerator {
     private MethodCallExpr applyPreconditionForOptionalPresent(MockingCall result, Object value, Callable callable) {
         MethodCallExpr methodCall;
         if (value instanceof Evaluator eval) {
-            if (baseTestClass != null) {
-                String mock = String.format("Mockito.mock(%s.class)", eval.getClassName());
-                Expression opt = StaticJavaParser.parseExpression("Optional.of(" + mock +   ")");
-                methodCall = MockingRegistry.buildMockitoWhen(
-                        callable.getNameAsString(), opt, result.getVariableName());
-            }
-            else {
-                Expression opt = StaticJavaParser.parseExpression("Optional.of(new " + eval.getClassName() + "())");
-                methodCall = MockingRegistry.buildMockitoWhen(
-                        callable.getNameAsString(), opt, result.getVariableName());
-            }
+            Expression optionalValue = buildOptionalPresentValue(result, eval);
+            Expression opt = StaticJavaParser.parseExpression("Optional.of(" + optionalValue + ")");
+            methodCall = MockingRegistry.buildMockitoWhen(
+                    callable.getNameAsString(), opt, result.getVariableName());
         }
         else {
             MethodCallExpr opt = new MethodCallExpr(new NameExpr("Optional"), "of")
@@ -1083,6 +1076,33 @@ public class UnitTestGenerator extends TestGenerator {
                     callable.getNameAsString(), opt, result.getVariableName());
         }
         return methodCall;
+    }
+
+    /**
+     * Prefer the evaluator-recorded initializer when we already know what concrete object shape
+     * the symbolic execution used for an Optional-present path. Falling back to Mockito.mock()
+     * here loses that information and can diverge from runtime behaviour, especially for JPA
+     * entities that are later serialized or converted by ObjectMapper.
+     */
+    private Expression buildOptionalPresentValue(MockingCall result, Evaluator eval) {
+        List<Expression> initializers = result.getVariable().getInitializer();
+        if (!initializers.isEmpty() && initializers.getFirst().isObjectCreationExpr()) {
+            return initializers.getFirst().clone();
+        }
+        String className = eval.getClassName();
+        if (isJpaEntity(className)) {
+            return StaticJavaParser.parseExpression("new " + className + "()");
+        }
+        if (baseTestClass != null) {
+            return StaticJavaParser.parseExpression(String.format("Mockito.mock(%s.class)", className));
+        }
+        return StaticJavaParser.parseExpression("new " + className + "()");
+    }
+
+    private boolean isJpaEntity(String className) {
+        return AntikytheraRunTime.getTypeDeclaration(className)
+                .map(type -> type.getAnnotationByName("Entity").isPresent())
+                .orElse(false);
     }
 
     private Expression createOptionalValueExpression(Object value) {
