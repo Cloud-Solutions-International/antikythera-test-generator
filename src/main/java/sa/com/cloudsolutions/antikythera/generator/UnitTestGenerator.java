@@ -1000,14 +1000,14 @@ public class UnitTestGenerator extends TestGenerator {
         }
 
         if (value instanceof String s) {
-            return new StringLiteralExpr(coerceSpecialStringField(field.getVariable(0).getNameAsString(), s));
+            return new StringLiteralExpr(coerceGeneratedStringPlaceholder(s));
         }
 
         return adjustInitializerForField(field, createOptionalValueExpression(value));
     }
 
     private Expression adjustInitializerForField(FieldDeclaration field, Expression initializer) {
-        Expression adjusted = adjustStringPlaceholder(field.getVariable(0).getNameAsString(), initializer);
+        Expression adjusted = adjustStringPlaceholder(initializer);
         return coerceInitializerForFieldType(field.getElementType(), adjusted);
     }
 
@@ -1063,18 +1063,15 @@ public class UnitTestGenerator extends TestGenerator {
         return fullClassName != null ? fullClassName : type.asString();
     }
 
-    private Expression adjustStringPlaceholder(String fieldName, Expression initializer) {
+    private Expression adjustStringPlaceholder(Expression initializer) {
         if (initializer instanceof StringLiteralExpr stringLiteral) {
-            return new StringLiteralExpr(coerceSpecialStringField(fieldName, stringLiteral.getValue()));
+            return new StringLiteralExpr(coerceGeneratedStringPlaceholder(stringLiteral.getValue()));
         }
         return initializer;
     }
 
-    private String coerceSpecialStringField(String fieldName, String value) {
-        if (!Reflect.ANTIKYTHERA.equals(value)) {
-            return value;
-        }
-        if (fieldName.endsWith("By") || fieldName.endsWith("Id")) {
+    private String coerceGeneratedStringPlaceholder(String value) {
+        if (Reflect.ANTIKYTHERA.equals(value)) {
             return "0";
         }
         return value;
@@ -1277,10 +1274,9 @@ public class UnitTestGenerator extends TestGenerator {
         if (mce.getScope().isPresent() && !setterExistsOnScopeType(mce.getScope().get(), mce.getNameAsString())) {
             return null;
         }
-        String fieldName = AbstractCompiler.classToInstanceName(mce.getNameAsString().substring(3));
         Expression arg = mce.getArgument(0);
         if (arg instanceof StringLiteralExpr stringLiteral) {
-            mce.setArgument(0, new StringLiteralExpr(coerceSpecialStringField(fieldName, stringLiteral.getValue())));
+            mce.setArgument(0, new StringLiteralExpr(coerceGeneratedStringPlaceholder(stringLiteral.getValue())));
         }
         if (mce.getScope().isPresent()) {
             resolveSetterParameterType(mce.getScope().get(), mce.getNameAsString()).ifPresent(parameterType ->

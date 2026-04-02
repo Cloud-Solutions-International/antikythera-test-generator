@@ -410,7 +410,7 @@ class UnitTestGeneratorTest {
     }
 
     @Test
-    void testCreateFieldInitializerCoercesIdLikeStringPlaceholder() throws Exception {
+    void testCreateFieldInitializerCoercesGeneratedStringPlaceholder() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod(
                 "createFieldInitializer", FieldDeclaration.class, Variable.class);
         method.setAccessible(true);
@@ -456,7 +456,7 @@ class UnitTestGeneratorTest {
     }
 
     @Test
-    void testNormalizeSetterPreconditionCoercesIdLikeStringPlaceholder() throws Exception {
+    void testNormalizeSetterPreconditionCoercesGeneratedStringPlaceholder() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod(
                 "normalizeSetterPrecondition", MethodCallExpr.class);
         method.setAccessible(true);
