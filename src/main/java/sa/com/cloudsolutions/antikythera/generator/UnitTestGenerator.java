@@ -908,7 +908,7 @@ public class UnitTestGenerator extends TestGenerator {
                 TypeDeclaration<?> t = typeDeclarationOpt.get();
                 for (FieldDeclaration field : t.getFields()) {
                     if (!v.getInitializer().isEmpty() && v.getInitializer().getFirst() instanceof ObjectCreationExpr) {
-                        mockFieldWithSetter(nameAsString, eval, field);
+                        mockFieldWithSetter(nameAsString, eval, t, field);
                     }
                     else {
                         mockFieldWithMockito(nameAsString, eval, field);
@@ -918,9 +918,10 @@ public class UnitTestGenerator extends TestGenerator {
         }
     }
 
-    private void mockFieldWithSetter(String nameAsString, Evaluator eval, FieldDeclaration field) {
+    private void mockFieldWithSetter(String nameAsString, Evaluator eval, TypeDeclaration<?> ownerType, FieldDeclaration field) {
         BlockStmt body = getBody(testMethod);
         String name = field.getVariable(0).getNameAsString();
+        String setterName = setterNameForField(ownerType, field);
 
         if (doesFieldNeedMocking(eval, name)) {
             Variable fieldVar = eval.getField(name);
@@ -928,22 +929,46 @@ public class UnitTestGenerator extends TestGenerator {
             if (value instanceof List || (value == null && isCollectionType(fieldVar.getType()))) {
                 TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
                 TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
-                body.addStatement(String.format("%s.set%s(new ArrayList());", nameAsString,
-                        AbstractCompiler.setterSuffixFromFieldName(name)));
+                body.addStatement(String.format("%s.%s(new ArrayList());", nameAsString, setterName));
             } else {
-                if (!fieldVar.getInitializer().isEmpty()) {
-                    Expression first = fieldVar.getInitializer().getFirst();
-                    if (first.isMethodCallExpr() && first.toString().startsWith("set")) {
+                Expression fieldInitializer = createFieldInitializer(field, fieldVar);
+                Expression coercedInitializer = fieldInitializer;
+                if (fieldInitializer != null) {
+                    coercedInitializer = resolveSetterParameterType(ownerType, setterName)
+                            .map(type -> coerceInitializerForFieldType(type, fieldInitializer))
+                            .orElse(fieldInitializer);
+                }
+                if (coercedInitializer != null) {
+                    if (coercedInitializer.isMethodCallExpr() && coercedInitializer.toString().startsWith("set")) {
                         body.addStatement(String.format("%s.%s;",
-                                nameAsString, first));
+                                nameAsString, coercedInitializer));
                     }
                     else {
-                        body.addStatement(String.format("%s.set%s(%s);",
-                                nameAsString, AbstractCompiler.setterSuffixFromFieldName(name), first));
+                        body.addStatement(String.format("%s.%s(%s);", nameAsString, setterName, coercedInitializer));
                     }
                 }
             }
         }
+    }
+
+    private String setterNameForField(TypeDeclaration<?> owner, FieldDeclaration field) {
+        String fieldName = field.getVariable(0).getNameAsString();
+        String standardSetter = "set" + AbstractCompiler.instanceToClassName(fieldName);
+        String booleanStyleSetter = "set" + AbstractCompiler.setterSuffixFromFieldName(fieldName);
+        if (owner != null && owner.getMethodsByName(standardSetter).stream().anyMatch(md -> md.getParameters().size() == 1)) {
+            return standardSetter;
+        }
+        if (owner != null && owner.getMethodsByName(booleanStyleSetter).stream().anyMatch(md -> md.getParameters().size() == 1)) {
+            return booleanStyleSetter;
+        }
+        Type fieldType = field.getElementType();
+        if (fieldType.isPrimitiveType() && fieldType.asPrimitiveType().getType() == PrimitiveType.Primitive.BOOLEAN) {
+            return booleanStyleSetter;
+        }
+        if (fieldName.startsWith("is") && fieldName.length() > 2 && Character.isUpperCase(fieldName.charAt(2))) {
+            return standardSetter;
+        }
+        return standardSetter;
     }
 
     private boolean doesFieldNeedMocking(Evaluator eval, String name) {
@@ -954,11 +979,53 @@ public class UnitTestGenerator extends TestGenerator {
 
         Object value = f.getValue();
         if (value == null) {
-            return isCollectionType(f.getType());
+            return isCollectionType(f.getType()) || canInstantiateFieldType(f.getType());
         }
 
         return !(f.getType().isPrimitiveType() && f.getValue().equals(Reflect.getDefault(f.getClazz())));
 
+    }
+
+    private Expression createFieldInitializer(FieldDeclaration field, Variable fieldVar) {
+        if (fieldVar.getValue() == null && canInstantiateFieldType(field.getElementType())) {
+            return createEmptyObjectInitializer(field.getElementType());
+        }
+        if (!fieldVar.getInitializer().isEmpty()) {
+            return adjustInitializerForField(field, fieldVar.getInitializer().getFirst());
+        }
+
+        Object value = fieldVar.getValue();
+        if (value == null) {
+            return createEmptyObjectInitializer(field.getElementType());
+        }
+
+        if (value instanceof String s) {
+            return new StringLiteralExpr(coerceSpecialStringField(field.getVariable(0).getNameAsString(), s));
+        }
+
+        return adjustInitializerForField(field, createOptionalValueExpression(value));
+    }
+
+    private Expression adjustInitializerForField(FieldDeclaration field, Expression initializer) {
+        Expression adjusted = adjustStringPlaceholder(field.getVariable(0).getNameAsString(), initializer);
+        return coerceInitializerForFieldType(field.getElementType(), adjusted);
+    }
+
+    private Expression coerceInitializerForFieldType(Type type, Expression initializer) {
+        if (initializer == null) {
+            return null;
+        }
+        String rawType = type.asString().replaceAll("<.*>", "").trim();
+        if (rawType.equals("Long") || rawType.equals("long")) {
+            if (initializer.isIntegerLiteralExpr()) {
+                return new LongLiteralExpr(initializer.asIntegerLiteralExpr().getValue() + "L");
+            }
+            String text = initializer.toString().trim();
+            if (text.matches("-?\\d+")) {
+                return new LongLiteralExpr(text + "L");
+            }
+        }
+        return initializer;
     }
 
     private static boolean isCollectionType(Type type) {
@@ -967,6 +1034,50 @@ public class UnitTestGenerator extends TestGenerator {
                 || raw.equals("Set") || raw.equals("HashSet") || raw.equals("LinkedHashSet")
                 || raw.equals("Collection") || raw.equals("Map") || raw.equals("HashMap")
                 || raw.equals("LinkedHashMap");
+    }
+
+    private boolean canInstantiateFieldType(Type type) {
+        if (type == null || type.isPrimitiveType() || isCollectionType(type)) {
+            return false;
+        }
+        String raw = type.asString().replaceAll("<.*>", "").trim();
+        if (raw.equals("String") || raw.startsWith("java.lang.")) {
+            return false;
+        }
+        Optional<TypeDeclaration<?>> typeDeclarationOpt = AntikytheraRunTime.getTypeDeclaration(resolveFieldTypeName(type));
+        if (typeDeclarationOpt.isPresent() && typeDeclarationOpt.get() instanceof ClassOrInterfaceDeclaration coid) {
+            return !coid.isInterface() && !coid.isAbstract();
+        }
+        return false;
+    }
+
+    private Expression createEmptyObjectInitializer(Type type) {
+        if (!canInstantiateFieldType(type)) {
+            return null;
+        }
+        return StaticJavaParser.parseExpression("new " + resolveFieldTypeName(type) + "()");
+    }
+
+    private String resolveFieldTypeName(Type type) {
+        String fullClassName = AbstractCompiler.findFullyQualifiedName(compilationUnitUnderTest, type);
+        return fullClassName != null ? fullClassName : type.asString();
+    }
+
+    private Expression adjustStringPlaceholder(String fieldName, Expression initializer) {
+        if (initializer instanceof StringLiteralExpr stringLiteral) {
+            return new StringLiteralExpr(coerceSpecialStringField(fieldName, stringLiteral.getValue()));
+        }
+        return initializer;
+    }
+
+    private String coerceSpecialStringField(String fieldName, String value) {
+        if (!Reflect.ANTIKYTHERA.equals(value)) {
+            return value;
+        }
+        if (fieldName.endsWith("By") || fieldName.endsWith("Id")) {
+            return "0";
+        }
+        return value;
     }
 
     private void mockFieldWithMockito(String nameAsString, Evaluator eval, FieldDeclaration field) {
@@ -1129,7 +1240,10 @@ public class UnitTestGenerator extends TestGenerator {
     private void applyPreconditionWithMockito(Expression expr) {
         BlockStmt body = getBody(testMethod);
         if (expr.isMethodCallExpr()) {
-            MethodCallExpr mce = expr.asMethodCallExpr();
+            MethodCallExpr mce = normalizeSetterPrecondition(expr.asMethodCallExpr().clone());
+            if (mce == null) {
+                return;
+            }
             mce.getScope().ifPresent(scope -> {
                 String name = mce.getNameAsString();
 
@@ -1142,7 +1256,7 @@ public class UnitTestGenerator extends TestGenerator {
                         ));
                     }
                     else {
-                        body.addStatement(expr);
+                        body.addStatement(mce);
                     }
                 }
             });
@@ -1154,6 +1268,83 @@ public class UnitTestGenerator extends TestGenerator {
                 replaceInitializer(testMethod, nameExpr.getNameAsString(), value);
             }
         }
+    }
+
+    private MethodCallExpr normalizeSetterPrecondition(MethodCallExpr mce) {
+        if (!mce.getNameAsString().startsWith("set") || mce.getArguments().size() != 1) {
+            return mce;
+        }
+        if (mce.getScope().isPresent() && !setterExistsOnScopeType(mce.getScope().get(), mce.getNameAsString())) {
+            return null;
+        }
+        String fieldName = AbstractCompiler.classToInstanceName(mce.getNameAsString().substring(3));
+        Expression arg = mce.getArgument(0);
+        if (arg instanceof StringLiteralExpr stringLiteral) {
+            mce.setArgument(0, new StringLiteralExpr(coerceSpecialStringField(fieldName, stringLiteral.getValue())));
+        }
+        if (mce.getScope().isPresent()) {
+            resolveSetterParameterType(mce.getScope().get(), mce.getNameAsString()).ifPresent(parameterType ->
+                    mce.setArgument(0, coerceInitializerForFieldType(parameterType, mce.getArgument(0))));
+        }
+        return mce;
+    }
+
+    private boolean setterExistsOnScopeType(Expression scope, String setterName) {
+        return resolveExpressionType(scope)
+                .map(typeName -> AntikytheraRunTime.getTypeDeclaration(typeName)
+                        .map(type -> hasSetterOrCompatibleField(type, setterName))
+                        .orElse(true))
+                .orElse(true);
+    }
+
+    private boolean hasSetterOrCompatibleField(TypeDeclaration<?> type, String setterName) {
+        if (type.getMethodsByName(setterName).stream().anyMatch(md -> md.getParameters().size() == 1)) {
+            return true;
+        }
+        String propertyName = AbstractCompiler.classToInstanceName(setterName.substring(3));
+        return type.getFields().stream().anyMatch(field -> {
+            String fieldName = field.getVariable(0).getNameAsString();
+            if (fieldName.equals(propertyName)) {
+                return true;
+            }
+            String booleanFieldName = "is" + AbstractCompiler.instanceToClassName(propertyName);
+            return fieldName.equals(booleanFieldName);
+        });
+    }
+
+    private Optional<Type> resolveSetterParameterType(Expression scope, String setterName) {
+        return resolveExpressionType(scope)
+                .flatMap(AntikytheraRunTime::getTypeDeclaration)
+                .flatMap(type -> resolveSetterParameterType(type, setterName));
+    }
+
+    private Optional<Type> resolveSetterParameterType(TypeDeclaration<?> type, String setterName) {
+        return type.getMethodsByName(setterName).stream()
+                .filter(md -> md.getParameters().size() == 1)
+                .map(md -> md.getParameter(0).getType())
+                .findFirst();
+    }
+
+    private Optional<String> resolveExpressionType(Expression scope) {
+        if (scope.isThisExpr()) {
+            return Optional.of(compilationUnitUnderTest.getPrimaryTypeName()
+                    .map(name -> compilationUnitUnderTest.getPackageDeclaration()
+                            .map(pd -> pd.getNameAsString() + "." + name)
+                            .orElse(name))
+                    .orElse(""));
+        }
+        if (scope.isNameExpr()) {
+            if (testMethod == null) {
+                return Optional.empty();
+            }
+            String variableName = scope.asNameExpr().getNameAsString();
+            return testMethod.findAll(VariableDeclarator.class).stream()
+                    .filter(vd -> vd.getNameAsString().equals(variableName))
+                    .map(vd -> resolveFieldTypeName(vd.getType()))
+                    .findFirst()
+                    .filter(typeName -> !typeName.isBlank());
+        }
+        return Optional.empty();
     }
 
     private void addClassImports(Type t) {

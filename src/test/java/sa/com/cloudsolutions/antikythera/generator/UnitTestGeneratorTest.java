@@ -394,6 +394,152 @@ class UnitTestGeneratorTest {
     }
 
     @Test
+    void testCreateFieldInitializerBuildsNestedObjectForNullPojoField() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "createFieldInitializer", FieldDeclaration.class, Variable.class);
+        method.setAccessible(true);
+
+        FieldDeclaration field = StaticJavaParser.parseBodyDeclaration("private Person manager;").asFieldDeclaration();
+        Variable variable = new Variable((Object) null);
+        variable.setType(new ClassOrInterfaceType(null, "Person"));
+
+        Expression expr = (Expression) method.invoke(unitTestGenerator, field, variable);
+
+        assertNotNull(expr);
+        assertEquals("new sa.com.cloudsolutions.model.Person()", expr.toString());
+    }
+
+    @Test
+    void testCreateFieldInitializerCoercesIdLikeStringPlaceholder() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "createFieldInitializer", FieldDeclaration.class, Variable.class);
+        method.setAccessible(true);
+
+        FieldDeclaration field = StaticJavaParser.parseBodyDeclaration("private String createdBy;").asFieldDeclaration();
+        Variable variable = new Variable("Antikythera");
+
+        Expression expr = (Expression) method.invoke(unitTestGenerator, field, variable);
+
+        assertInstanceOf(StringLiteralExpr.class, expr);
+        assertEquals("\"0\"", expr.toString());
+    }
+
+    @Test
+    void testCreateFieldInitializerCoercesIntegerLiteralForLongField() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "createFieldInitializer", FieldDeclaration.class, Variable.class);
+        method.setAccessible(true);
+
+        FieldDeclaration field = StaticJavaParser.parseBodyDeclaration("private Long clinicGroupId;").asFieldDeclaration();
+        Variable variable = new Variable(0);
+
+        Expression expr = (Expression) method.invoke(unitTestGenerator, field, variable);
+
+        assertInstanceOf(LongLiteralExpr.class, expr);
+        assertEquals("0L", expr.toString());
+    }
+
+    @Test
+    void testCreateFieldInitializerCoercesInitializerLiteralForLongField() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "createFieldInitializer", FieldDeclaration.class, Variable.class);
+        method.setAccessible(true);
+
+        FieldDeclaration field = StaticJavaParser.parseBodyDeclaration("private Long clinicGroupId;").asFieldDeclaration();
+        Variable variable = new Variable((Object) null);
+        variable.setInitializer(List.of(StaticJavaParser.parseExpression("0")));
+
+        Expression expr = (Expression) method.invoke(unitTestGenerator, field, variable);
+
+        assertInstanceOf(LongLiteralExpr.class, expr);
+        assertEquals("0L", expr.toString());
+    }
+
+    @Test
+    void testNormalizeSetterPreconditionCoercesIdLikeStringPlaceholder() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "normalizeSetterPrecondition", MethodCallExpr.class);
+        method.setAccessible(true);
+
+        MethodCallExpr expr = StaticJavaParser.parseExpression("patientProblem.setCreatedBy(\"Antikythera\")")
+                .asMethodCallExpr();
+
+        MethodCallExpr normalized = (MethodCallExpr) method.invoke(unitTestGenerator, expr);
+
+        assertEquals("patientProblem.setCreatedBy(\"0\")", normalized.toString());
+    }
+
+    @Test
+    void testSetterNameForFieldKeepsIsPrefixForBoxedBoolean() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod("setterNameForField", TypeDeclaration.class, FieldDeclaration.class);
+        method.setAccessible(true);
+
+        TypeDeclaration<?> owner = StaticJavaParser.parseBodyDeclaration("""
+                class Sample {
+                    private Boolean isPreviousProblem;
+                }
+                """).asClassOrInterfaceDeclaration();
+        FieldDeclaration field = owner.getFieldByName("isPreviousProblem").orElseThrow();
+
+        String setterName = (String) method.invoke(unitTestGenerator, owner, field);
+
+        assertEquals("setIsPreviousProblem", setterName);
+    }
+
+    @Test
+    void testSetterNameForFieldPrefersDeclaredBooleanStyleSetter() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod("setterNameForField", TypeDeclaration.class, FieldDeclaration.class);
+        method.setAccessible(true);
+
+        TypeDeclaration<?> owner = StaticJavaParser.parseBodyDeclaration("""
+                class Sample {
+                    private Boolean isPreviousProblem;
+                    public void setPreviousProblem(Boolean previousProblem) {}
+                }
+                """).asClassOrInterfaceDeclaration();
+        FieldDeclaration field = owner.getFieldByName("isPreviousProblem").orElseThrow();
+
+        String setterName = (String) method.invoke(unitTestGenerator, owner, field);
+
+        assertEquals("setPreviousProblem", setterName);
+    }
+
+    @Test
+    void testNormalizeSetterPreconditionCoercesIntegerLiteralToLongParameter() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "normalizeSetterPrecondition", MethodCallExpr.class);
+        method.setAccessible(true);
+
+        unitTestGenerator.createTests(classUnderTest.getMethodsByName("queries2").getFirst(), new MethodResponse());
+        unitTestGenerator.testMethod.getBody().orElseThrow()
+                .addStatement("sa.com.cloudsolutions.model.Person person = new sa.com.cloudsolutions.model.Person();");
+
+        MethodCallExpr expr = StaticJavaParser.parseExpression("person.setId(0)").asMethodCallExpr();
+
+        MethodCallExpr normalized = (MethodCallExpr) method.invoke(unitTestGenerator, expr);
+
+        assertEquals("person.setId(0L)", normalized.toString());
+    }
+
+    @Test
+    void testNormalizeSetterPreconditionSkipsMissingSetterForScopeType() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "normalizeSetterPrecondition", MethodCallExpr.class);
+        method.setAccessible(true);
+
+        unitTestGenerator.createTests(classUnderTest.getMethodsByName("queries2").getFirst(), new MethodResponse());
+        unitTestGenerator.testMethod.getBody().orElseThrow()
+                .addStatement("sa.com.cloudsolutions.model.Person patientProblem = new sa.com.cloudsolutions.model.Person();");
+
+        MethodCallExpr expr = StaticJavaParser.parseExpression("patientProblem.setPreviousProblem(false)")
+                .asMethodCallExpr();
+
+        Object normalized = method.invoke(unitTestGenerator, expr);
+
+        assertNull(normalized);
+    }
+
+    @Test
     void testAssertValueWithNoSideEffectsBoxedLong() throws Exception {
         java.lang.reflect.Method m = UnitTestGenerator.class.getDeclaredMethod(
                 "toScalarLiteralExpression", sa.com.cloudsolutions.antikythera.evaluator.Variable.class, Object.class);
