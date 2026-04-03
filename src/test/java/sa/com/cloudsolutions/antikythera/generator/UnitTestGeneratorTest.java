@@ -56,6 +56,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -615,6 +616,135 @@ class UnitTestGeneratorTest {
         sa.com.cloudsolutions.antikythera.evaluator.Variable v = new sa.com.cloudsolutions.antikythera.evaluator.Variable((byte) 5);
         Expression lit = (Expression) m.invoke(unitTestGenerator, v, (byte) 5);
         assertEquals("(byte) 5", lit.toString());
+    }
+
+    @Test
+    void testShouldSuppressNoSuchElementAssertThrowsWithoutOptionalEmptyUsage() throws Exception {
+        MethodDeclaration createMethod = classUnderTest.getMethodsByName("queries2").getFirst();
+        unitTestGenerator.createTests(createMethod, new MethodResponse());
+
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "shouldSuppressNoSuchElementAssertThrows", sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext.class);
+        method.setAccessible(true);
+
+        sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext ctx =
+                new sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext();
+        ctx.setException(new NoSuchElementException());
+
+        boolean suppressed = (boolean) method.invoke(unitTestGenerator, ctx);
+
+        assertTrue(suppressed);
+    }
+
+    @Test
+    void testShouldNotSuppressNoSuchElementAssertThrowsWithOptionalEmptyUsage() throws Exception {
+        MethodDeclaration createMethod = classUnderTest.getMethodsByName("queries2").getFirst();
+        unitTestGenerator.createTests(createMethod, new MethodResponse());
+        unitTestGenerator.testMethod.getBody().orElseThrow().addStatement("java.util.Optional.empty();");
+
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "shouldSuppressNoSuchElementAssertThrows", sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext.class);
+        method.setAccessible(true);
+
+        sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext ctx =
+                new sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext();
+        ctx.setException(new NoSuchElementException());
+
+        boolean suppressed = (boolean) method.invoke(unitTestGenerator, ctx);
+
+        assertFalse(suppressed);
+    }
+
+    @Test
+    void testSeedCollectionArgumentsForExceptionUsesNonEmptyElement() throws Exception {
+        MethodDeclaration method = StaticJavaParser.parseBodyDeclaration("""
+                void createChiefComplains(java.util.List<Person> chiefComplains, String userId) {}
+                """).asMethodDeclaration();
+        Method build = UnitTestGenerator.class.getDeclaredMethod("buildNonEmptyCollectionInitializer", Parameter.class);
+        build.setAccessible(true);
+
+        Expression replacement = (Expression) build.invoke(unitTestGenerator, method.getParameter(0));
+
+        assertNotNull(replacement);
+        assertTrue(replacement.toString().contains("java.util.List.of("));
+    }
+
+    @Test
+    void testShouldSuppressIllegalArgumentAssertThrowsForEvaluatorOnlyPath() throws Exception {
+        MethodDeclaration createMethod = classUnderTest.getMethodsByName("queries2").getFirst();
+        unitTestGenerator.createTests(createMethod, new MethodResponse());
+        unitTestGenerator.testMethod.getBody().orElseThrow().addStatement("Long patientId = 0L;");
+        unitTestGenerator.testMethod.getBody().orElseThrow().addStatement(
+                "Mockito.when(personRepository.findById(Mockito.anyLong())).thenReturn(java.util.Optional.of(new sa.com.cloudsolutions.model.Person()));");
+
+        Method extract = UnitTestGenerator.class.getDeclaredMethod("extractTestArguments");
+        extract.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, Expression> currentArgs = (Map<String, Expression>) extract.invoke(unitTestGenerator);
+
+        sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext ctx =
+                new sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext();
+        ctx.setException(new IllegalArgumentException("evaluator-only"));
+
+        Method suppress = UnitTestGenerator.class.getDeclaredMethod(
+                "shouldSuppressIllegalArgumentAssertThrows",
+                sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext.class,
+                Map.class);
+        suppress.setAccessible(true);
+
+        boolean result = (boolean) suppress.invoke(unitTestGenerator, ctx, currentArgs);
+
+        assertTrue(result);
+    }
+
+    @Test
+    void testShouldSuppressIllegalArgumentAssertThrowsWithoutMockStubsWhenInputsAreConcrete() throws Exception {
+        MethodDeclaration createMethod = classUnderTest.getMethodsByName("queries2").getFirst();
+        unitTestGenerator.createTests(createMethod, new MethodResponse());
+        unitTestGenerator.testMethod.getBody().orElseThrow().addStatement("Long patientId = 0L;");
+
+        Method extract = UnitTestGenerator.class.getDeclaredMethod("extractTestArguments");
+        extract.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, Expression> currentArgs = (Map<String, Expression>) extract.invoke(unitTestGenerator);
+
+        sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext ctx =
+                new sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext();
+        ctx.setException(new IllegalArgumentException("evaluator-only"));
+
+        Method suppress = UnitTestGenerator.class.getDeclaredMethod(
+                "shouldSuppressIllegalArgumentAssertThrows",
+                sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext.class,
+                Map.class);
+        suppress.setAccessible(true);
+
+        boolean result = (boolean) suppress.invoke(unitTestGenerator, ctx, currentArgs);
+
+        assertTrue(result);
+    }
+
+    @Test
+    void testSetupLoggersUsesDebugLevel() throws Exception {
+        Settings.setProperty(Settings.LOG_APPENDER, "com.example.LogAppender");
+        MethodDeclaration createMethod = classUnderTest.getMethodsByName("queries2").getFirst();
+        unitTestGenerator.createTests(createMethod, new MethodResponse());
+
+        Method setupLoggers = UnitTestGenerator.class.getDeclaredMethod("setupLoggers");
+        setupLoggers.setAccessible(true);
+        setupLoggers.invoke(unitTestGenerator);
+
+        assertTrue(unitTestGenerator.getCompilationUnit().toString().contains("appLogger.setLevel(Level.DEBUG);"));
+    }
+
+    @Test
+    void testAssertLoggedWithLevelNormalizesSlf4jTemplate() {
+        Expression assertion = UnitTestGenerator.assertLoggedWithLevel(
+                "com.example.Service",
+                "DEBUG",
+                "Episode saved  ----> {}");
+
+        assertTrue(assertion.toString().contains("\"Episode saved  ---->\""));
+        assertFalse(assertion.toString().contains("{}"));
     }
 }
 

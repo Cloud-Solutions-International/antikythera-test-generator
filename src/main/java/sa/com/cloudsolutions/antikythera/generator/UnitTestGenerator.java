@@ -74,6 +74,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
@@ -384,11 +385,26 @@ public class UnitTestGenerator extends TestGenerator {
         
         // Extract current test arguments
         Map<String, Expression> currentArgs = extractTestArguments();
+
+        seedCollectionArgumentsForException(ctx, currentArgs);
+        currentArgs = extractTestArguments();
         
         logger.debug("Extracted {} test arguments", currentArgs.size());
         
         // Check if arguments will trigger exception
         boolean willTrigger = exceptionAnalyzer.willArgumentsTriggerException(ctx, currentArgs);
+
+        if (shouldSuppressIllegalArgumentAssertThrows(ctx, currentArgs)) {
+            logger.info("Suppressing assertThrows(IllegalArgumentException) for {} — generated setup does not recreate the evaluator-only exception path",
+                    methodUnderTest.getNameAsString());
+            willTrigger = false;
+        }
+
+        if (willTrigger && shouldSuppressNoSuchElementAssertThrows(ctx)) {
+            logger.info("Suppressing assertThrows(NoSuchElementException) for {} — no explicit Optional.empty() trigger exists in generated setup",
+                    methodUnderTest.getNameAsString());
+            willTrigger = false;
+        }
         
         logger.info("Exception analysis for {}: type={}, willTrigger={}", 
             methodUnderTest.getNameAsString(), type, willTrigger);
@@ -446,6 +462,87 @@ public class UnitTestGenerator extends TestGenerator {
         return args;
     }
 
+    private void seedCollectionArgumentsForException(ExceptionContext ctx, Map<String, Expression> currentArgs) {
+        if (ctx == null || currentArgs.isEmpty()) {
+            return;
+        }
+        if (containsCause(ctx.getException(), NullPointerException.class)
+                || containsCause(ctx.getException(), NoSuchElementException.class)) {
+            return;
+        }
+
+        for (Parameter param : methodUnderTest.getParameters()) {
+            if (!isCollectionParameter(param.getType())) {
+                continue;
+            }
+            String name = param.getNameAsString();
+            Expression initializer = currentArgs.get(name);
+            if (initializer == null || !isDefinitelyEmptyCollection(initializer)) {
+                continue;
+            }
+
+            Expression replacement = buildNonEmptyCollectionInitializer(param);
+            if (replacement == null) {
+                continue;
+            }
+
+            replaceInitializer(testMethod, name, replacement);
+            logger.info("Replaced empty collection argument '{}' with a non-empty invalid sample to preserve exception-path coverage",
+                    name);
+        }
+    }
+
+    private boolean isCollectionParameter(Type type) {
+        if (!type.isClassOrInterfaceType()) {
+            return false;
+        }
+        String raw = type.asString().replaceAll("<.*>", "").trim();
+        return raw.equals("List") || raw.equals("ArrayList") || raw.equals("Collection")
+                || raw.equals("Set") || raw.equals("HashSet");
+    }
+
+    private boolean isDefinitelyEmptyCollection(Expression expr) {
+        String text = expr.toString().replace(" ", "");
+        if (text.equals("newArrayList<>()") || text.equals("newArrayList()")
+                || text.equals("newHashSet<>()") || text.equals("newHashSet()")
+                || text.equals("List.of()") || text.equals("Set.of()")
+                || text.equals("Collections.emptyList()") || text.equals("Collections.emptySet()")) {
+            return true;
+        }
+        return expr.isObjectCreationExpr() && expr.asObjectCreationExpr().getArguments().isEmpty()
+                && isCollectionParameter(expr.asObjectCreationExpr().getType());
+    }
+
+    private Expression buildNonEmptyCollectionInitializer(Parameter param) {
+        if (!param.getType().isClassOrInterfaceType()) {
+            return null;
+        }
+        Optional<Type> typeArgOpt = param.getType().asClassOrInterfaceType().getTypeArguments()
+                .flatMap(args -> args.getFirst());
+        if (typeArgOpt.isEmpty()) {
+            return null;
+        }
+
+        Type elementType = typeArgOpt.orElseThrow();
+        String rawElementType = elementType.asString().replaceAll("<.*>", "").trim();
+        String fqcn = AbstractCompiler.findFullyQualifiedName(compilationUnitUnderTest, rawElementType);
+        String elementInitializer;
+        if (fqcn != null) {
+            elementInitializer = "new " + fqcn + "()";
+        } else if (canInstantiateFieldType(elementType)) {
+            elementInitializer = "new " + rawElementType + "()";
+        } else {
+            return null;
+        }
+
+        String rawCollectionType = param.getType().asString().replaceAll("<.*>", "").trim();
+        String collectionInitializer = switch (rawCollectionType) {
+            case "Set", "HashSet" -> "new java.util.HashSet<>(java.util.List.of(" + elementInitializer + "))";
+            default -> "new java.util.ArrayList<>(java.util.List.of(" + elementInitializer + "))";
+        };
+        return StaticJavaParser.parseExpression(collectionInitializer);
+    }
+
     /**
      * Returns true if the current test method already contains at least one Mockito.when(...)
      * call.  If there are no stubs, the service's dependencies are plain @Mock fields that
@@ -485,6 +582,49 @@ public class UnitTestGenerator extends TestGenerator {
             }
         }
         return hasNullReturn && !hasNonNullReturn;
+    }
+
+    private boolean hasThenThrowStubs() {
+        return !testMethod.findAll(MethodCallExpr.class,
+                m -> m.getNameAsString().equals("thenThrow")).isEmpty();
+    }
+
+    private boolean shouldSuppressIllegalArgumentAssertThrows(ExceptionContext ctx, Map<String, Expression> currentArgs) {
+        if (ctx == null || !containsCause(ctx.getException(), IllegalArgumentException.class)) {
+            return false;
+        }
+        if (hasThenThrowStubs()) {
+            return false;
+        }
+        for (Expression expr : currentArgs.values()) {
+            if (expr instanceof NullLiteralExpr || isDefinitelyEmptyCollection(expr)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean shouldSuppressNoSuchElementAssertThrows(ExceptionContext ctx) {
+        return ctx != null
+                && containsCause(ctx.getException(), NoSuchElementException.class)
+                && !hasOptionalEmptyUsage();
+    }
+
+    private boolean hasOptionalEmptyUsage() {
+        return !testMethod.findAll(MethodCallExpr.class, m ->
+                m.getScope().map(Expression::toString).orElse("").endsWith("Optional")
+                        && m.getNameAsString().equals("empty")).isEmpty();
+    }
+
+    private boolean containsCause(Throwable throwable, Class<? extends Throwable> type) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     void addDependencies() {
@@ -1640,7 +1780,7 @@ public class UnitTestGenerator extends TestGenerator {
             body.addStatement("logAppender = new LogAppender();");
             body.addStatement("logAppender.start();");
             body.addStatement("appLogger.addAppender(logAppender);");
-            body.addStatement("appLogger.setLevel(Level.INFO);");
+            body.addStatement("appLogger.setLevel(Level.DEBUG);");
             body.addStatement("LogAppender.events.clear(); // Clear static list from previous tests");
 
             if (testClass.getFieldByName("appLogger").isEmpty()) {
@@ -2021,11 +2161,12 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     public static Expression assertLoggedWithLevel(String className, String level, String expectedMessage) {
+        String normalizedMessage = expectedMessage == null ? null : expectedMessage.replace("{}", "").trim();
         MethodCallExpr assertion = new MethodCallExpr("assertTrue");
         MethodCallExpr condition = new MethodCallExpr("LogAppender.hasMessage")
                 .addArgument(new FieldAccessExpr(new NameExpr("Level"), level))
                 .addArgument(new StringLiteralExpr(className))
-                .addArgument(new StringLiteralExpr(expectedMessage));
+                .addArgument(new StringLiteralExpr(normalizedMessage));
 
         assertion.addArgument(condition);
         return assertion;
