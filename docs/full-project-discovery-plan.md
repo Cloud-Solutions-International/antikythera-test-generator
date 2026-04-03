@@ -30,7 +30,8 @@ This fallback should target all source classes with real executable logic, not j
 
 **1. Structural / type-system-level skips (cheapest checks first)**
 - Annotation type declarations (`@interface`)
-- Interfaces — covers `@FeignClient` interfaces, Spring Data `Repository`/`JpaRepository`/`CrudRepository` extension interfaces, `*RepositoryCustom` contracts, marker interfaces, functional interfaces, and all other interface types
+- `@FeignClient` interfaces (use explicit reason: `FEIGN_CLIENT`)
+- Interfaces — covers Spring Data `Repository`/`JpaRepository`/`CrudRepository` extension interfaces, `*RepositoryCustom` contracts, marker interfaces, functional interfaces, and all other interface types
 - Enums — skip by default; enum types that define non-trivial methods are a future opt-in via `include_enum_logic: true`
 - Records — purely data-carrying; no point testing auto-generated accessors
 - Abstract classes — cannot be instantiated; synthetic subclass generation is out of scope
@@ -55,7 +56,6 @@ This fallback should target all source classes with real executable logic, not j
 - `@Aspect`
 
 **6. Messaging infrastructure**
-- `@FeignClient` interfaces (already covered by interface rule; use `FEIGN_CLIENT` as reason in logs)
 - Feign fallback `@Component` stubs with no real logic should be skipped by no-logic checks
 
 **7. Constant and property-holder classes**
@@ -86,7 +86,8 @@ This fallback should target all source classes with real executable logic, not j
 
 ### Nested / Inner Class Handling
 - `AntikytheraRunTime` already registers nested types during preprocessing.
-- Apply classification to each registered type independently.
+- Apply classification to each registered type independently for discovery purposes.
+- Generation/orchestration must still remain compilation-unit aware: the current `ServicesParser` / `UnitTestGenerator` flow is organized around a cached `CompilationUnit` and its top-level public test suite, not a fully independent nested-type output path.
 - Static inner `Builder` classes should typically be caught by boilerplate/data-carrier checks.
 - Private inner classes are not reachable from tests and should be skipped.
 - Nested `@Entity` / `@Embeddable` follow normal entity skip rules.
@@ -120,9 +121,11 @@ USER_SKIP_LIST
 
 ### Leveraging Existing Antikythera Infrastructure
 - Reuse `AbstractCompiler.shouldSkip(String)` for `skip`-list suffix matching.
-- Reuse `EntityMappingResolver.isEntity(TypeWrapper)` for robust entity detection across `javax` and `jakarta` plus binary classes.
+- Reuse `EntityMappingResolver.isEntity(TypeWrapper)` for robust `@Entity` detection across `javax` and `jakarta` plus binary classes.
+- Add dedicated checks for `@Embeddable`, `@MappedSuperclass`, and `@IdClass`; those are not currently covered by `EntityMappingResolver.isEntity(TypeWrapper)`.
 - Reuse `AntikytheraRunTime.getResolvedTypes()` for discovery (no file-system re-scan).
-- Reuse `AntikytheraRunTime.findImplementations(String)` for Spring Data repository detection.
+- Prefer `BaseRepositoryParser.isJpaRepository(TypeWrapper|TypeDeclaration<?>)` for Spring Data repository detection.
+- `AntikytheraRunTime.findImplementations(String)` can still be used as supporting metadata where useful, but it should not be the primary detector for repository interfaces.
 - Reuse `TypeWrapper.isInterface()` and JavaParser native checks (`isAnnotationDeclaration`, `isRecordDeclaration`, `isAbstract`).
 
 ### Core/Metadata Support
@@ -172,6 +175,7 @@ Each test creates a `TypeWrapper` from a hand-crafted `CompilationUnit` and asse
 | `@ControllerAdvice` | `SKIP` | `CONTROLLER_ADVICE` |
 | `@Entity` | `SKIP` | `ENTITY` |
 | `@Embeddable` | `SKIP` | `EMBEDDABLE` |
+| `@MappedSuperclass` | `SKIP` | `MAPPED_SUPERCLASS` |
 | `interface extends JpaRepository` | `SKIP` | `SPRING_DATA_REPOSITORY` |
 | `@Configuration` | `SKIP` | `CONFIGURATION` |
 | `@SpringBootApplication` | `SKIP` | `SPRING_BOOT_APPLICATION` |
@@ -196,6 +200,7 @@ Add the fixture project and supporting sample classes in `antikythera-test-helpe
 - Hand-written `@Repository` impl with `EntityManager` → included
 - Spring Data `interface extends JpaRepository` → excluded
 - `@Entity` / `@Embeddable` → excluded
+- `@MappedSuperclass` / `@IdClass` → excluded
 - DTO with `@Data` and no logic → excluded
 - DTO-like name with real method → included
 - `@RestController` / `@ControllerAdvice` → excluded

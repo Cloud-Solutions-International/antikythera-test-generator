@@ -4,24 +4,24 @@ Work items are ordered by dependency: each group should be completed before the 
 See [full-project-discovery-plan.md](full-project-discovery-plan.md) for detailed specification.
 
 ### Module Boundary Rule
-- [ ] **Put core engine changes in `antikythera`** — preprocessing, expression-evaluation behavior, type resolution, runtime metadata, and reusable analysis helpers belong in core.
-- [ ] **Keep generation-only code in `antikythera-test-generator`** — target selection orchestration, fallback mode handling, and generated-test emission behavior stay in generator.
+- [x] **Put core engine changes in `antikythera`** — preprocessing, expression-evaluation behavior, type resolution, runtime metadata, and reusable analysis helpers belong in core.
+- [x] **Keep generation-only code in `antikythera-test-generator`** — target selection orchestration, fallback mode handling, and generated-test emission behavior stay in generator.
 
 ### Phase 0 — Audit and expose existing infrastructure
-- [ ] Make `AbstractCompiler.shouldSkip(String)` callable from the classifier path (public wrapper or visibility change).
-- [ ] Confirm `EntityMappingResolver.isEntity(TypeWrapper)` is used by classifier (no raw `@Entity`-only check).
-- [ ] Confirm `AntikytheraRunTime.getResolvedTypes()` is fully populated after preprocess.
-- [ ] Use `AntikytheraRunTime.findImplementations(String)` for Spring Data repository detection.
-- [ ] Add `isRepository` and `isConfiguration` flags to `TypeWrapper` and populate in `AbstractCompiler.processType()`.
+- [x] Make `AbstractCompiler.shouldSkip(String)` callable from the classifier path (public wrapper or visibility change).
+- [x] Use `EntityMappingResolver.isEntity(TypeWrapper)` for `@Entity` detection only; add separate checks for `@Embeddable`, `@MappedSuperclass`, and `@IdClass`.
+- [x] Confirm `AntikytheraRunTime.getResolvedTypes()` is fully populated after preprocess.
+- [x] Prefer `BaseRepositoryParser.isJpaRepository(TypeWrapper|TypeDeclaration<?>)` for Spring Data repository detection; use `AntikytheraRunTime.findImplementations(String)` only as supporting metadata if needed.
+- [x] Add `isRepository` and `isConfiguration` flags to `TypeWrapper` and populate in `AbstractCompiler.processType()`.
 
 ### Phase 1 — Core model (no behavior change yet)
-- [ ] Add `SkipReason` enum.
-- [ ] Add `ClassificationDecision` enum (`UNIT_TARGET`, `SKIP`).
-- [ ] Add `ClassificationResult` (decision + reason + explanation).
+- [x] Add `SkipReason` enum.
+- [x] Add `ClassificationDecision` enum (`UNIT_TARGET`, `SKIP`).
+- [x] Add `ClassificationResult` (decision + reason + explanation).
 
 ### Phase 2 — `TargetClassifier`
 - [ ] Create `TargetClassifier` with `ClassificationResult classify(TypeWrapper)`.
-- [ ] Implement structural skips (`annotation/interface/enum/record/abstract`).
+- [ ] Implement structural skips (`annotation/feign-interface/interface/enum/record/abstract`) with explicit rule ordering so `FEIGN_CLIENT` is not swallowed by generic `INTERFACE`.
 - [ ] Implement web-layer skips (`controller/advice/ResponseEntityExceptionHandler`).
 - [ ] Implement persistence skips (entity-family + Spring Data repo interfaces).
 - [ ] Implement bootstrap skips (`configuration/config-props/boot app/main`).
@@ -46,6 +46,7 @@ See [full-project-discovery-plan.md](full-project-discovery-plan.md) for detaile
 - [ ] Add `isFallbackMode()` helper (both `services` and `controllers` absent/empty).
 - [ ] Add `discoverUnitTargets()` using resolved types + classifier.
 - [ ] Wire fallback into unit generation flow.
+- [ ] Keep discovery/classification per-type, but make generation remain compilation-unit aware so nested discovered types do not assume standalone test output without extra orchestration.
 - [ ] Add INFO summary and DEBUG per-class decision logs.
 
 ### Phase 6 — Integration tests
