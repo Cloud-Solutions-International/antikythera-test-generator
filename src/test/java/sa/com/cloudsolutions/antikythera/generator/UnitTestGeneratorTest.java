@@ -688,6 +688,36 @@ class UnitTestGeneratorMoreTests extends TestHelper {
     }
 
     @Test
+    void testProblemFeignClientUsesPlainMocks() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "applyMockAnnotationForDependencyType", FieldDeclaration.class, Type.class);
+        method.setAccessible(true);
+
+        ClassOrInterfaceDeclaration testSuite = new ClassOrInterfaceDeclaration().setName("SampleTest");
+        FieldDeclaration field = testSuite.addField("ProblemFeignClient", "problemFeignClient");
+
+        method.invoke(null, field, field.getElementType());
+
+        assertTrue(field.getAnnotationByName("Mock").isPresent());
+        assertFalse(field.toString().contains("RETURNS_DEEP_STUBS"));
+    }
+
+    @Test
+    void testClientDependenciesUseDeepStubs() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "applyMockAnnotationForDependencyType", FieldDeclaration.class, Type.class);
+        method.setAccessible(true);
+
+        ClassOrInterfaceDeclaration testSuite = new ClassOrInterfaceDeclaration().setName("SampleTest");
+        FieldDeclaration field = testSuite.addField("ErFeignClient", "erFeignClient");
+
+        method.invoke(null, field, field.getElementType());
+
+        assertTrue(field.getAnnotationByName("Mock").isPresent());
+        assertTrue(field.toString().contains("RETURNS_DEEP_STUBS"));
+    }
+
+    @Test
     void integrationTestFindAll() throws ReflectiveOperationException {
         LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
         loggerContext.getLogger(Logger.ROOT_LOGGER_NAME).setLevel(Level.OFF);

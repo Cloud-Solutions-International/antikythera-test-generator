@@ -1864,13 +1864,15 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     /**
-     * DAOs, repositories, and Feign clients often chain calls; plain Mockito defaults (null) cause NPEs
-     * in generated tests. Deep stubs return nested mocks so simple service paths execute.
+     * DAOs and repositories generally benefit from deep stubs. Client dependencies do too, with a
+     * narrow exception for ProblemFeignClient where plain mocks preserve the intended failure-path
+     * behavior in generated tests.
      */
     private static void applyMockAnnotationForDependencyType(FieldDeclaration field, Type elementType) {
         if (elementType.isClassOrInterfaceType()) {
             String simple = elementType.asClassOrInterfaceType().getNameAsString();
-            if (simple.endsWith("Dao") || simple.endsWith("Repository") || simple.endsWith("Client")) {
+            if (simple.endsWith("Dao") || simple.endsWith("Repository")
+                    || (simple.endsWith("Client") && !simple.equals("ProblemFeignClient"))) {
                 field.addAnnotation(new NormalAnnotationExpr(new Name("Mock"), new NodeList<>(
                         new MemberValuePair("answer", new FieldAccessExpr(new NameExpr("Answers"), "RETURNS_DEEP_STUBS"))
                 )));
