@@ -456,6 +456,18 @@ class UnitTestGeneratorTest {
     }
 
     @Test
+    void testDefaultExpressionForSimpleTypeUsesLongLiteralSuffix() throws Exception {
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "defaultExpressionForSimpleType", Type.class);
+        method.setAccessible(true);
+
+        Expression expr = (Expression) method.invoke(unitTestGenerator, new ClassOrInterfaceType(null, "Long"));
+
+        assertInstanceOf(LongLiteralExpr.class, expr);
+        assertEquals("0L", expr.toString());
+    }
+
+    @Test
     void testNormalizeSetterPreconditionCoercesGeneratedStringPlaceholder() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod(
                 "normalizeSetterPrecondition", MethodCallExpr.class);

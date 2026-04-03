@@ -501,10 +501,113 @@ public class UnitTestGenerator extends TestGenerator {
             if (expr instanceof MethodCallExpr mce && skipWhenUsage(mce)) {
                 continue;
             }
+            normalizeInlineObjectCreationNulls(expr);
             expandInlineDtoCollectionFields(expr);
             getBody(testMethod).addStatement(expr);
         }
         clearWhenThen();
+    }
+
+    /**
+     * Repository/query evaluation can synthesize inline constructor calls containing nulls for
+     * simple boxed/String parameters. That tends to create test stubs that fail before the
+     * intended branch is reached. When we can infer a simple constructor signature from source,
+     * replace those null arguments with generic non-null defaults.
+     */
+    private void normalizeInlineObjectCreationNulls(Expression expr) {
+        Optional<CompilationUnit> cuOpt = methodUnderTest.findCompilationUnit();
+        if (cuOpt.isEmpty()) {
+            return;
+        }
+
+        for (ObjectCreationExpr oce : expr.findAll(ObjectCreationExpr.class)) {
+            if (oce.getArguments().isEmpty() || oce.getArguments().stream().noneMatch(Expression::isNullLiteralExpr)) {
+                continue;
+            }
+
+            List<Type> parameterTypes = resolveSimpleConstructorParameterTypes(cuOpt.orElseThrow(), oce);
+            if (parameterTypes == null) {
+                continue;
+            }
+
+            NodeList<Expression> normalizedArgs = new NodeList<>();
+            for (int i = 0; i < oce.getArguments().size(); i++) {
+                Expression argument = oce.getArgument(i);
+                if (argument.isNullLiteralExpr()) {
+                    Expression defaultExpression = defaultExpressionForSimpleType(parameterTypes.get(i));
+                    if (defaultExpression != null) {
+                        normalizedArgs.add(defaultExpression);
+                        continue;
+                    }
+                }
+                normalizedArgs.add(argument);
+            }
+            oce.setArguments(normalizedArgs);
+        }
+    }
+
+    private List<Type> resolveSimpleConstructorParameterTypes(CompilationUnit cu, ObjectCreationExpr oce) {
+        String typeName = oce.getType().getNameAsString();
+        String fqn = oce.getType().getScope()
+                .map(scope -> scope + "." + typeName)
+                .orElseGet(() -> AbstractCompiler.findFullyQualifiedName(cu, typeName));
+        if (fqn == null) {
+            return null;
+        }
+
+        Optional<TypeDeclaration<?>> typeDeclaration = AntikytheraRunTime.getTypeDeclaration(fqn);
+        if (typeDeclaration.isPresent() && typeDeclaration.orElseThrow() instanceof ClassOrInterfaceDeclaration coid) {
+            for (ConstructorDeclaration constructor : coid.getConstructors()) {
+                if (constructor.getParameters().size() != oce.getArguments().size()) {
+                    continue;
+                }
+                List<Type> parameterTypes = new ArrayList<>();
+                boolean allSimple = true;
+                for (Parameter parameter : constructor.getParameters()) {
+                    if (!isSimpleConstructorType(parameter.getType())) {
+                        allSimple = false;
+                        break;
+                    }
+                    parameterTypes.add(parameter.getType());
+                }
+                if (allSimple) {
+                    return parameterTypes;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isSimpleConstructorType(Type type) {
+        if (type.isPrimitiveType()) {
+            return true;
+        }
+        if (!type.isClassOrInterfaceType()) {
+            return false;
+        }
+        String simpleName = type.asClassOrInterfaceType().getNameAsString();
+        return switch (simpleName) {
+            case "String", "Integer", "Long", "Boolean", "Double", "Float", "Byte", "Short", "Character" -> true;
+            default -> false;
+        };
+    }
+
+    private Expression defaultExpressionForSimpleType(Type type) {
+        String simpleName = type.isClassOrInterfaceType()
+                ? type.asClassOrInterfaceType().getNameAsString()
+                : type.asString();
+        return switch (simpleName) {
+            case "String" -> new StringLiteralExpr("0");
+            case "Long", "long" -> new LongLiteralExpr("0L");
+            case "Integer", "int" -> new IntegerLiteralExpr("0");
+            case "Boolean", "boolean" -> new BooleanLiteralExpr(false);
+            case "Double", "double", "Float", "float" -> StaticJavaParser.parseExpression("0.0");
+            case "Short", "short", "Byte", "byte", "Character", "char" -> new IntegerLiteralExpr("0");
+            default -> {
+                Object defaultValue = Reflect.getDefault(simpleName);
+                yield defaultValue != null ? Reflect.createLiteralExpression(defaultValue) : null;
+            }
+        };
     }
 
     /**
@@ -1467,8 +1570,22 @@ public class UnitTestGenerator extends TestGenerator {
 
         body.addStatement(asserter.assertNotNull("resp"));
         if (value instanceof Collection<?> c) {
+            if (responseIsLowConfidenceCollection(result)) {
+                return;
+            }
             body.addStatement(c.isEmpty() ? asserter.assertEmpty("resp") : asserter.assertNotEmpty("resp"));
         }
+    }
+
+    private boolean responseIsLowConfidenceCollection(Variable result) {
+        return result != null
+                && result.getValue() instanceof Collection<?>
+                && methodUnderTest instanceof MethodDeclaration methodDeclaration
+                && methodDeclaration.findCompilationUnit().isPresent()
+                && MethodResponse.confidenceForDeclaredReturnType(
+                        methodDeclaration.findCompilationUnit().orElseThrow(),
+                        methodDeclaration.getType()
+                ) == sa.com.cloudsolutions.antikythera.generator.AssertionConfidence.LOW;
     }
 
     /**

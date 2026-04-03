@@ -46,6 +46,9 @@ public abstract class Asserter {
 
                 if (value != null && !fieldName.equals("serialVersionUID")
                         && value.getValue() != null) {
+                    if (shouldSkipCollectionFieldAssertion(fieldVariable, value)) {
+                        continue;
+                    }
 
                     String getter = findGetter(value, fieldName, type);
                     if (getter != null) {
@@ -60,6 +63,20 @@ public abstract class Asserter {
                 break;
             }
         }
+    }
+
+    private boolean shouldSkipCollectionFieldAssertion(VariableDeclarator fieldVariable, Variable value) {
+        if (!(value.getValue() instanceof Collection<?>)) {
+            return false;
+        }
+
+        /*
+         * The evaluator fabricates empty collections to keep traversal alive, but DTOs with no
+         * declared collection initializer often still return null at runtime after mapping.
+         * Only size-assert those fields when the source field itself declares a concrete
+         * initializer.
+         */
+        return fieldVariable.getInitializer().isEmpty();
     }
 
     private String findGetter(Variable value, String fieldName, TypeDeclaration<?> type) {
