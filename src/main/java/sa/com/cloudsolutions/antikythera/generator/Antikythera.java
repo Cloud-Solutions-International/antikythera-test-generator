@@ -102,6 +102,9 @@ public class Antikythera {
             Settings.loadConfigMap(new File(args[0].trim()));
         }
         Antikythera antk = Antikythera.getInstance();
+        if (isFallbackMode()) {
+            logger.info("No explicit controllers or services configured — using full-project fallback discovery for unit tests");
+        }
         antk.preProcess();
         antk.generateApiTests();
         Stats stats = RestControllerParser.getStats();
@@ -214,7 +217,30 @@ public class Antikythera {
         return Paths.get(outputPath).getParent().getParent().getParent().toString();
     }
 
+    /**
+     * True when both {@code controllers} and {@code services} are absent or empty in {@code generator.yml},
+     * enabling full-project unit-test discovery via {@link UnitTestDiscovery#discoverFallbackUnitTargets()}.
+     */
+    public static boolean isFallbackMode() {
+        Collection<String> c = Settings.getPropertyList(Settings.CONTROLLERS, String.class);
+        Collection<String> s = Settings.getPropertyList(Settings.SERVICES, String.class);
+        return c.isEmpty() && s.isEmpty();
+    }
+
     private void generateUnitTests() throws IOException {
+        if (isFallbackMode()) {
+            List<String> targets = UnitTestDiscovery.discoverFallbackUnitTargets();
+            logger.info("Fallback mode: processing {} discovered unit target(s)", targets.size());
+            for (String path : targets) {
+                try {
+                    processService(path, new String[] { path });
+                } catch (Throwable t) {
+                    logger.warn("Fallback: skipped unit target {} — {}", path, t.toString());
+                    logger.debug("Fallback skip stack trace for {}", path, t);
+                }
+            }
+            return;
+        }
         for (String service : services) {
             String[] parts = service.split("#");
             String path = parts[0];
