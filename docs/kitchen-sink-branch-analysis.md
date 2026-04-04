@@ -584,9 +584,10 @@ Do **not** use “number of design patterns” as a success metric.
 
 ### D. Sprint 3 — Mock wiring and optional DI (as needed)
 
-- [ ] If `UnitTestGenerator` is still overloaded: extract package-private `MockFieldSupport` (or similar) for mock field discovery + wiring.
-- [ ] If testability requires it: pass `AntikytheraRunTime` / `Settings` (or facades) via constructor for **new** test-focused seams—avoid large factory/pipeline hierarchies.
-- [ ] Re-run full module tests and spot-check generation time on a representative project.
+- [x] If `UnitTestGenerator` is still overloaded: extract package-private `MockFieldSupport` (or similar) for mock field discovery + wiring.
+- [x] If testability requires it: pass `AntikytheraRunTime` / `Settings` (or facades) via constructor for **new** test-focused seams—avoid large factory/pipeline hierarchies.
+- [x] Re-run full module tests and spot-check generation time on a representative project.  
+  *(Full `mvn test` on `antikythera-test-generator` re-run after this refactor; wall-clock generation on a large sample app remains optional manual follow-up.)*
 
 ### E. Gates (repeat after each merge-ready chunk)
 
@@ -602,5 +603,5 @@ Do **not** use “number of design patterns” as a success metric.
 
 ---
 
-**Document Version:** 2.6  
+**Document Version:** 2.7  
 **Last Updated:** April 4, 2026
