@@ -59,7 +59,6 @@ import sa.com.cloudsolutions.antikythera.evaluator.logging.LogRecorder;
 import sa.com.cloudsolutions.antikythera.evaluator.mock.MockingCall;
 import sa.com.cloudsolutions.antikythera.evaluator.mock.MockingRegistry;
 import sa.com.cloudsolutions.antikythera.exception.AntikytheraException;
-import sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
 import sa.com.cloudsolutions.antikythera.parser.AbstractCompiler;
 import sa.com.cloudsolutions.antikythera.parser.Callable;
 import sa.com.cloudsolutions.antikythera.parser.ImportWrapper;
@@ -92,7 +91,7 @@ import java.util.Set;
  * need to be added.</p>
  */
 public class UnitTestGenerator extends TestGenerator {
-    private static final Logger logger = LoggerFactory.getLogger(UnitTestGenerator.class);
+    static final Logger logger = LoggerFactory.getLogger(UnitTestGenerator.class);
     public static final String TEST_NAME_SUFFIX = "AKTest";
     public static final String MOCK_BEAN = TestGenerationConstants.MOCK_BEAN_SIMPLE_NAME;
     public static final String MOCK = TestGenerationConstants.MOCK_SIMPLE_NAME;
@@ -122,7 +121,7 @@ public class UnitTestGenerator extends TestGenerator {
      * Analyzer for determining if test arguments will trigger exceptions.
      * Used to avoid generating assertThrows when exceptions won't actually occur.
      */
-    private final ExceptionAnalyzer exceptionAnalyzer = new ExceptionAnalyzer();
+    final ExceptionAnalyzer exceptionAnalyzer = new ExceptionAnalyzer();
 
     public UnitTestGenerator(CompilationUnit cu) {
         super(cu);
@@ -355,105 +354,10 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     /**
-     * Handle exception responses with smart analysis.
-     * Checks if test arguments will actually trigger the exception before adding assertThrows.
-     * 
-     * @param response The method response containing exception context
-     * @param invocation The method invocation string
+     * Delegates to {@link ExceptionResponseAsserter} for assertThrows vs success-path logic.
      */
     private void handleExceptionResponse(MethodResponse response, String invocation) {
-        ExceptionContext ctx = response.getExceptionContext();
-        
-        // Debug logging
-        logger.info("handleExceptionResponse: ctx={}, exception={}, insideLoop={}, loopContext={}", 
-            ctx != null, ctx != null ? ctx.getException() : null,
-            ctx != null ? ctx.isInsideLoop() : "N/A",
-            ctx != null && ctx.getLoopContext() != null ? "YES" : "NO");
-        
-        // Fallback for backward compatibility - if no context, use old behavior
-        if (ctx == null || ctx.getException() == null) {
-            logger.warn("No exception context available, using legacy assertThrows behavior");
-            String[] parts = invocation.split("=");
-            assertThrows(parts.length == 2 ? parts[1] : parts[0], response);
-            return;
-        }
-        
-        // Analyze the exception type
-        ExceptionType type = exceptionAnalyzer.analyzeException(ctx, 
-            methodUnderTest instanceof MethodDeclaration ? (MethodDeclaration) methodUnderTest : null);
-        
-        logger.info("Exception type analyzed as: {} (insideLoop={}, hasLoopContext={})", 
-            type, ctx.isInsideLoop(), ctx.getLoopContext() != null);
-        
-        // Extract current test arguments
-        Map<String, Expression> currentArgs = extractTestArguments();
-
-        seedCollectionArgumentsForException(ctx, currentArgs);
-        currentArgs = extractTestArguments();
-        
-        logger.debug("Extracted {} test arguments", currentArgs.size());
-        
-        // Check if arguments will trigger exception
-        boolean willTrigger = exceptionAnalyzer.willArgumentsTriggerException(ctx, currentArgs);
-
-        boolean illegalArgumentSuppressionApplied = false;
-        if (shouldSuppressIllegalArgumentAssertThrows(ctx, currentArgs)) {
-            logger.info("Suppressing assertThrows(IllegalArgumentException) for {} — generated setup does not recreate the evaluator-only exception path",
-                    methodUnderTest.getNameAsString());
-            willTrigger = false;
-            illegalArgumentSuppressionApplied = true;
-        }
-
-        if (willTrigger && shouldSuppressNoSuchElementAssertThrows(ctx)) {
-            logger.info("Suppressing assertThrows(NoSuchElementException) for {} — no explicit Optional.empty() trigger exists in generated setup",
-                    methodUnderTest.getNameAsString());
-            willTrigger = false;
-        }
-        
-        logger.info("Exception analysis for {}: type={}, willTrigger={}", 
-            methodUnderTest.getNameAsString(), type, willTrigger);
-
-        boolean reinstatedNpe = false;
-        if (!willTrigger) {
-            // Before treating as success-path, verify the suppression is safe:
-            // 1. If the test has NO mock stubs at all, the NPE likely comes from a plain
-            //    @Mock() returning null — that null is real at runtime, so keep assertThrows.
-            // 2. If the test has explicit thenReturn(null) stubs, the null is intentional;
-            //    dereferencing it causes a real NPE at runtime — keep assertThrows.
-            if (!hasWhenStubs()) {
-                logger.info("Reinstating assertThrows(NPE) for {} — test has no stubs; plain @Mock returns null at runtime",
-                    methodUnderTest.getNameAsString());
-                willTrigger = true;
-                reinstatedNpe = true;
-            } else if (hasNullThenReturnStubs()) {
-                logger.info("Reinstating assertThrows(NPE) for {} — test has explicit thenReturn(null) stub; null is real",
-                    methodUnderTest.getNameAsString());
-                willTrigger = true;
-                reinstatedNpe = true;
-            }
-        }
-
-        if (!willTrigger) {
-            // Exception won't trigger with current arguments - skip assertThrows
-            logger.info("Skipping assertThrows for {} - arguments won't trigger {} exception",
-                methodUnderTest.getNameAsString(), type);
-            // Instead, generate a normal success-path test
-            addAsserts(response, invocation);
-        } else {
-            // Exception will trigger - use normal assertThrows behavior
-            logger.debug("Generating assertThrows for {} - exception will be triggered", 
-                methodUnderTest.getNameAsString());
-            if (reinstatedNpe && illegalArgumentSuppressionApplied) {
-                /*
-                 * IAE suppression + reinstatement (no stubs / null stub): response.getException() may still
-                 * carry an evaluator-only IllegalArgumentException cause while the JVM throws NPE from null
-                 * dereferences. Align MethodResponse so JunitAsserter emits NPE.class.
-                 */
-                response.setException(new EvaluatorException("Reinstated assertThrows for runtime NPE", new NullPointerException()));
-            }
-            String[] parts = invocation.split("=");
-            assertThrows(parts.length == 2 ? parts[1] : parts[0], response);
-        }
+        new ExceptionResponseAsserter(this).handle(response, invocation);
     }
     
     /**
@@ -462,7 +366,7 @@ public class UnitTestGenerator extends TestGenerator {
      * 
      * @return Map of parameter name to initialization expression
      */
-    private Map<String, Expression> extractTestArguments() {
+    Map<String, Expression> extractTestArguments() {
         Map<String, Expression> args = new HashMap<>();
         
         // Find variable declarations in the test method
@@ -477,7 +381,7 @@ public class UnitTestGenerator extends TestGenerator {
         return args;
     }
 
-    private void seedCollectionArgumentsForException(ExceptionContext ctx, Map<String, Expression> currentArgs) {
+    void seedCollectionArgumentsForException(ExceptionContext ctx, Map<String, Expression> currentArgs) {
         if (ctx == null || currentArgs.isEmpty()) {
             return;
         }
@@ -542,7 +446,7 @@ public class UnitTestGenerator extends TestGenerator {
      * call.  If there are no stubs, the service's dependencies are plain @Mock fields that
      * return null for any unstubbed invocation — any resulting NPE is real, not an artefact.
      */
-    private boolean hasWhenStubs() {
+    boolean hasWhenStubs() {
         return !testMethod.findAll(MethodCallExpr.class,
             m -> m.getNameAsString().equals("when")).isEmpty();
     }
@@ -560,7 +464,7 @@ public class UnitTestGenerator extends TestGenerator {
      * find returns null) use the null stub for a branch that may never be reached,
      * so the NPE suppression should still apply for those tests.
      */
-    private boolean hasNullThenReturnStubs() {
+    boolean hasNullThenReturnStubs() {
         boolean hasNullReturn = false;
         boolean hasNonNullReturn = false;
         for (MethodCallExpr mce : testMethod.findAll(MethodCallExpr.class)) {
@@ -583,7 +487,7 @@ public class UnitTestGenerator extends TestGenerator {
                 m -> m.getNameAsString().equals("thenThrow")).isEmpty();
     }
 
-    private boolean shouldSuppressIllegalArgumentAssertThrows(ExceptionContext ctx, Map<String, Expression> currentArgs) {
+    boolean shouldSuppressIllegalArgumentAssertThrows(ExceptionContext ctx, Map<String, Expression> currentArgs) {
         if (ctx == null || !containsCause(ctx.getException(), IllegalArgumentException.class)) {
             return false;
         }
@@ -620,7 +524,7 @@ public class UnitTestGenerator extends TestGenerator {
         return false;
     }
 
-    private boolean shouldSuppressNoSuchElementAssertThrows(ExceptionContext ctx) {
+    boolean shouldSuppressNoSuchElementAssertThrows(ExceptionContext ctx) {
         return ctx != null
                 && containsCause(ctx.getException(), NoSuchElementException.class)
                 && !hasOptionalEmptyUsage();
@@ -670,35 +574,37 @@ public class UnitTestGenerator extends TestGenerator {
      * intended branch is reached. When we can infer a simple constructor signature from source,
      * replace those null arguments with generic non-null defaults.
      */
+    private void replaceNullArgumentsWithDefaults(ObjectCreationExpr oce, List<Type> parameterTypes) {
+        NodeList<Expression> normalizedArgs = new NodeList<>();
+        for (int i = 0; i < oce.getArguments().size(); i++) {
+            Expression argument = oce.getArgument(i);
+            if (argument.isNullLiteralExpr()) {
+                Expression defaultExpression = defaultExpressionForSimpleType(parameterTypes.get(i));
+                if (defaultExpression != null) {
+                    normalizedArgs.add(defaultExpression);
+                    continue;
+                }
+            }
+            normalizedArgs.add(argument);
+        }
+        oce.setArguments(normalizedArgs);
+    }
+
     private void normalizeInlineObjectCreationNulls(Expression expr) {
         Optional<CompilationUnit> cuOpt = methodUnderTest.findCompilationUnit();
         if (cuOpt.isEmpty()) {
             return;
         }
-
+        CompilationUnit cu = cuOpt.orElseThrow();
         for (ObjectCreationExpr oce : expr.findAll(ObjectCreationExpr.class)) {
             if (oce.getArguments().isEmpty() || oce.getArguments().stream().noneMatch(Expression::isNullLiteralExpr)) {
                 continue;
             }
-
-            List<Type> parameterTypes = resolveSimpleConstructorParameterTypes(cuOpt.orElseThrow(), oce);
+            List<Type> parameterTypes = resolveSimpleConstructorParameterTypes(cu, oce);
             if (parameterTypes == null) {
                 continue;
             }
-
-            NodeList<Expression> normalizedArgs = new NodeList<>();
-            for (int i = 0; i < oce.getArguments().size(); i++) {
-                Expression argument = oce.getArgument(i);
-                if (argument.isNullLiteralExpr()) {
-                    Expression defaultExpression = defaultExpressionForSimpleType(parameterTypes.get(i));
-                    if (defaultExpression != null) {
-                        normalizedArgs.add(defaultExpression);
-                        continue;
-                    }
-                }
-                normalizedArgs.add(argument);
-            }
-            oce.setArguments(normalizedArgs);
+            replaceNullArgumentsWithDefaults(oce, parameterTypes);
         }
     }
 
@@ -1201,37 +1107,46 @@ public class UnitTestGenerator extends TestGenerator {
         }
     }
 
+    private void addListCollectionSetterStub(BlockStmt body, String receiverName, String setterName) {
+        TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
+        TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
+        body.addStatement(String.format("%s.%s(new ArrayList());", receiverName, setterName));
+    }
+
+    private void addSetterCallWithCoercedInitializer(BlockStmt body, String receiverName, String setterName,
+            TypeDeclaration<?> ownerType, Expression fieldInitializer) {
+        Expression coercedInitializer = fieldInitializer;
+        if (fieldInitializer != null) {
+            coercedInitializer = resolveSetterParameterType(ownerType, setterName)
+                    .map(type -> coerceInitializerForFieldType(type, fieldInitializer))
+                    .orElse(fieldInitializer);
+        }
+        if (coercedInitializer == null) {
+            return;
+        }
+        if (coercedInitializer.isMethodCallExpr() && coercedInitializer.toString().startsWith("set")) {
+            body.addStatement(String.format("%s.%s;", receiverName, coercedInitializer));
+        } else {
+            body.addStatement(String.format("%s.%s(%s);", receiverName, setterName, coercedInitializer));
+        }
+    }
+
     private void mockFieldWithSetter(String nameAsString, Evaluator eval, TypeDeclaration<?> ownerType, FieldDeclaration field) {
         BlockStmt body = getBody(testMethod);
         String name = field.getVariable(0).getNameAsString();
         String setterName = JavaBeansConventions.setterNameForField(ownerType, field);
 
-        if (doesFieldNeedMocking(eval, name)) {
-            Variable fieldVar = eval.getField(name);
-            Object value = fieldVar.getValue();
-            if (value instanceof List || (value == null && TypeInspector.isCollectionOrMapFieldType(fieldVar.getType()))) {
-                TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
-                TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
-                body.addStatement(String.format("%s.%s(new ArrayList());", nameAsString, setterName));
-            } else {
-                Expression fieldInitializer = createFieldInitializer(field, fieldVar);
-                Expression coercedInitializer = fieldInitializer;
-                if (fieldInitializer != null) {
-                    coercedInitializer = resolveSetterParameterType(ownerType, setterName)
-                            .map(type -> coerceInitializerForFieldType(type, fieldInitializer))
-                            .orElse(fieldInitializer);
-                }
-                if (coercedInitializer != null) {
-                    if (coercedInitializer.isMethodCallExpr() && coercedInitializer.toString().startsWith("set")) {
-                        body.addStatement(String.format("%s.%s;",
-                                nameAsString, coercedInitializer));
-                    }
-                    else {
-                        body.addStatement(String.format("%s.%s(%s);", nameAsString, setterName, coercedInitializer));
-                    }
-                }
-            }
+        if (!doesFieldNeedMocking(eval, name)) {
+            return;
         }
+        Variable fieldVar = eval.getField(name);
+        Object value = fieldVar.getValue();
+        if (value instanceof List || (value == null && TypeInspector.isCollectionOrMapFieldType(fieldVar.getType()))) {
+            addListCollectionSetterStub(body, nameAsString, setterName);
+            return;
+        }
+        Expression fieldInitializer = createFieldInitializer(field, fieldVar);
+        addSetterCallWithCoercedInitializer(body, nameAsString, setterName, ownerType, fieldInitializer);
     }
 
     private boolean doesFieldNeedMocking(Evaluator eval, String name) {
@@ -1249,6 +1164,13 @@ public class UnitTestGenerator extends TestGenerator {
 
     }
 
+    private Expression createFieldInitializerFromEvaluatorValue(FieldDeclaration field, Object value) {
+        if (value instanceof String s) {
+            return new StringLiteralExpr(coerceGeneratedStringPlaceholder(s));
+        }
+        return adjustInitializerForField(field, createOptionalValueExpression(value));
+    }
+
     private Expression createFieldInitializer(FieldDeclaration field, Variable fieldVar) {
         if (fieldVar.getValue() == null && canInstantiateFieldType(field.getElementType())) {
             return createEmptyObjectInitializer(field.getElementType());
@@ -1256,17 +1178,10 @@ public class UnitTestGenerator extends TestGenerator {
         if (!fieldVar.getInitializer().isEmpty()) {
             return adjustInitializerForField(field, fieldVar.getInitializer().getFirst());
         }
-
-        Object value = fieldVar.getValue();
-        if (value == null) {
+        if (fieldVar.getValue() == null) {
             return createEmptyObjectInitializer(field.getElementType());
         }
-
-        if (value instanceof String s) {
-            return new StringLiteralExpr(coerceGeneratedStringPlaceholder(s));
-        }
-
-        return adjustInitializerForField(field, createOptionalValueExpression(value));
+        return createFieldInitializerFromEvaluatorValue(field, fieldVar.getValue());
     }
 
     private Expression adjustInitializerForField(FieldDeclaration field, Expression initializer) {
@@ -1616,7 +1531,7 @@ public class UnitTestGenerator extends TestGenerator {
         return b.toString();
     }
 
-    private void addAsserts(MethodResponse response, String invocation) {
+    void addAsserts(MethodResponse response, String invocation) {
         Type t = null;
         if (methodUnderTest instanceof MethodDeclaration md) {
             t = md.getType();
@@ -1801,57 +1716,66 @@ public class UnitTestGenerator extends TestGenerator {
      * Generate service instance creation and ReflectionTestUtils.setField() calls to inject all mocked fields.
      * This approach guarantees field injection works even with duplicate field types (e.g., two PatientPOMRDao fields).
      */
-    private void injectMockedFieldsViaReflection(BlockStmt beforeBody) {
-        ClassOrInterfaceDeclaration bean = null;
-        String serviceClassName = null;
+    private record StereotypeServiceTarget(String serviceClassName, ClassOrInterfaceDeclaration bean) {
+    }
 
+    private Optional<StereotypeServiceTarget> findStereotypeServiceTarget() {
         for (TypeDeclaration<?> type : compilationUnitUnderTest.getTypes()) {
             if (type instanceof ClassOrInterfaceDeclaration c && isSpringStereotypeBean(c)) {
-                bean = c;
-                serviceClassName = type.getNameAsString();
-                break;
+                return Optional.of(new StereotypeServiceTarget(type.getNameAsString(), c));
             }
         }
+        return Optional.empty();
+    }
 
-        if (serviceClassName == null || bean == null) {
-            return;
-        }
-
-        String serviceInstanceName = AbstractCompiler.classToInstanceName(serviceClassName);
-
-        // Find all mocked fields from gen (test class CompilationUnit)
+    private List<String> collectMockedFieldNamesFromGeneratedTestClass() {
         List<String> mockedFieldNames = new ArrayList<>();
         for (TypeDeclaration<?> testType : gen.getTypes()) {
             for (FieldDeclaration field : testType.getFields()) {
                 boolean hasMockAnnotation = field.getAnnotations().stream()
                         .anyMatch(ann -> ann.getNameAsString().equals(TestGenerationConstants.MOCK_SIMPLE_NAME)
                                 || ann.getNameAsString().equals(TestGenerationConstants.MOCK_BEAN_SIMPLE_NAME));
-
                 if (hasMockAnnotation) {
                     mockedFieldNames.add(field.getVariable(0).getNameAsString());
                 }
             }
         }
+        return mockedFieldNames;
+    }
 
-        // Always instantiate the stereotype bean; @Component classes with no @Autowired fields still need `new` in setUp.
+    private static void appendServiceInstantiationStatement(BlockStmt beforeBody, String serviceInstanceName, String serviceClassName) {
         ObjectCreationExpr newInstance = new ObjectCreationExpr(null, new ClassOrInterfaceType(serviceClassName), new NodeList<>());
         AssignExpr instantiation = new AssignExpr(new NameExpr(serviceInstanceName), newInstance, AssignExpr.Operator.ASSIGN);
         beforeBody.addStatement(instantiation);
+    }
 
-        // Generate setField calls for each mocked field
+    private static void appendMockReflectionSetFieldCalls(BlockStmt beforeBody, String serviceInstanceName, List<String> mockedFieldNames) {
         for (String fieldName : mockedFieldNames) {
             MethodCallExpr setFieldCall = new MethodCallExpr(
-                new NameExpr(TestGenerationConstants.REFLECTION_TEST_UTILS_SIMPLE_NAME),
-                "setField",
-                new NodeList<>(
-                    new NameExpr(serviceInstanceName),
-                    new StringLiteralExpr(fieldName),
-                    new NameExpr(fieldName)
-                )
+                    new NameExpr(TestGenerationConstants.REFLECTION_TEST_UTILS_SIMPLE_NAME),
+                    "setField",
+                    new NodeList<>(
+                            new NameExpr(serviceInstanceName),
+                            new StringLiteralExpr(fieldName),
+                            new NameExpr(fieldName)
+                    )
             );
             beforeBody.addStatement(setFieldCall);
         }
+    }
 
+    private void injectMockedFieldsViaReflection(BlockStmt beforeBody) {
+        Optional<StereotypeServiceTarget> target = findStereotypeServiceTarget();
+        if (target.isEmpty()) {
+            return;
+        }
+        String serviceClassName = target.get().serviceClassName();
+        ClassOrInterfaceDeclaration bean = target.get().bean();
+        String serviceInstanceName = AbstractCompiler.classToInstanceName(serviceClassName);
+        List<String> mockedFieldNames = collectMockedFieldNamesFromGeneratedTestClass();
+
+        appendServiceInstantiationStatement(beforeBody, serviceInstanceName, serviceClassName);
+        appendMockReflectionSetFieldCalls(beforeBody, serviceInstanceName, mockedFieldNames);
         injectValueFieldsViaReflection(beforeBody, bean, serviceInstanceName);
     }
 

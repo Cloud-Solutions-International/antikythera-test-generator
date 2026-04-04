@@ -576,10 +576,10 @@ Do **not** use “number of design patterns” as a success metric.
 
 ### C. Sprint 2 — Exception path and long methods
 
-- [ ] Extract `ExceptionResponseAsserter` (name TBD): move body of `handleExceptionResponse` behind a thin method on `UnitTestGenerator`.
-- [ ] Document side effects (e.g. collection re-seeding) in the new class; keep them explicit in the API or call order.
-- [ ] Add or extend unit tests targeting the asserter’s decisions (null/IAE/NPE/suppression paths).
-- [ ] Extract method(s) from `injectMockedFieldsViaReflection`, `mockFieldWithSetter`, `normalizeInlineObjectCreationNulls`, `createFieldInitializer` as separate steps; run tests after each extraction.
+- [x] Extract `ExceptionResponseAsserter` (name TBD): move body of `handleExceptionResponse` behind a thin method on `UnitTestGenerator`.
+- [x] Document side effects (e.g. collection re-seeding) in the new class; keep them explicit in the API or call order.
+- [x] Add or extend unit tests targeting the asserter’s decisions (null/IAE/NPE/suppression paths).
+- [x] Extract method(s) from `injectMockedFieldsViaReflection`, `mockFieldWithSetter`, `normalizeInlineObjectCreationNulls`, `createFieldInitializer` as separate steps; run tests after each extraction.
 - [ ] Optional: diff generated tests for a sample project before/after the exception refactor.
 
 ### D. Sprint 3 — Mock wiring and optional DI (as needed)
@@ -591,7 +591,7 @@ Do **not** use “number of design patterns” as a success metric.
 ### E. Gates (repeat after each merge-ready chunk)
 
 - [x] `JAVA_HOME=... mvn test` (or `verify`) for `antikythera-test-generator` with `antikythera` installed as required by `AGENTS.md`.
-- [ ] No new dependencies introduced without `pom.xml` / license review.
+- [x] No new dependencies introduced without `pom.xml` / license review.
 - [ ] User-visible behavior change documented in `README` or `docs/` when configuration or output changes.
 
 ---
@@ -602,5 +602,5 @@ Do **not** use “number of design patterns” as a success metric.
 
 ---
 
-**Document Version:** 2.5  
+**Document Version:** 2.6  
 **Last Updated:** April 4, 2026
