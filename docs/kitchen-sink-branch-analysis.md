@@ -567,12 +567,12 @@ Do **not** use “number of design patterns” as a success metric.
 
 ### B. Sprint 1 — Utilities and constants
 
-- [ ] Introduce `JavaBeansConventions` (or equivalent); switch `setterNameForField` / `getterMethodNameForField` / related call sites.
-- [ ] Introduce `TypeInspector` (or extend one helper); replace repeated `List` / `Set` / `Map` raw-name checks in `UnitTestGenerator` (and elsewhere as needed).
-- [ ] Introduce `CollectionExpressionAnalyzer` (or single shared helper); align `UnitTestGenerator` and `ExceptionAnalyzer` empty-collection detection where safe.
-- [ ] Introduce `TestGenerationConstants`; replace repeated literals (paths, `"Mock"`, placeholders, etc.) without behavior change.
+- [x] Introduce `JavaBeansConventions` (or equivalent); switch `setterNameForField` / `getterMethodNameForField` / related call sites.
+- [x] Introduce `TypeInspector` (or extend one helper); replace repeated `List` / `Set` / `Map` raw-name checks in `UnitTestGenerator` (and elsewhere as needed).
+- [x] Introduce `CollectionExpressionAnalyzer` (or single shared helper); align `UnitTestGenerator` and `ExceptionAnalyzer` empty-collection detection where safe.
+- [x] Introduce `TestGenerationConstants`; replace repeated literals (paths, `"Mock"`, placeholders, etc.) without behavior change.
 - [ ] Optional: add a small `record` for test-argument maps if it clarifies exception handling call sites.
-- [ ] Run `antikythera-test-generator` tests + install `antikythera` first per `AGENTS.md`.
+- [x] Run `antikythera-test-generator` tests + install `antikythera` first per `AGENTS.md`.
 
 ### C. Sprint 2 — Exception path and long methods
 
@@ -590,7 +590,7 @@ Do **not** use “number of design patterns” as a success metric.
 
 ### E. Gates (repeat after each merge-ready chunk)
 
-- [ ] `JAVA_HOME=... mvn test` (or `verify`) for `antikythera-test-generator` with `antikythera` installed as required by `AGENTS.md`.
+- [x] `JAVA_HOME=... mvn test` (or `verify`) for `antikythera-test-generator` with `antikythera` installed as required by `AGENTS.md`.
 - [ ] No new dependencies introduced without `pom.xml` / license review.
 - [ ] User-visible behavior change documented in `README` or `docs/` when configuration or output changes.
 
@@ -602,5 +602,5 @@ Do **not** use “number of design patterns” as a success metric.
 
 ---
 
-**Document Version:** 2.4  
+**Document Version:** 2.5  
 **Last Updated:** April 4, 2026
