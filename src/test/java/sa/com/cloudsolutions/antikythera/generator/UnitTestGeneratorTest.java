@@ -536,7 +536,7 @@ class UnitTestGeneratorTest {
 
     @Test
     void testSetterNameForFieldKeepsIsPrefixForBoxedBoolean() throws Exception {
-        Method method = UnitTestGenerator.class.getDeclaredMethod("setterNameForField", TypeDeclaration.class, FieldDeclaration.class);
+        Method method = JavaBeansConventions.class.getDeclaredMethod("setterNameForField", TypeDeclaration.class, FieldDeclaration.class);
         method.setAccessible(true);
 
         TypeDeclaration<?> owner = StaticJavaParser.parseBodyDeclaration("""
@@ -546,14 +546,14 @@ class UnitTestGeneratorTest {
                 """).asClassOrInterfaceDeclaration();
         FieldDeclaration field = owner.getFieldByName("isPreviousProblem").orElseThrow();
 
-        String setterName = (String) method.invoke(unitTestGenerator, owner, field);
+        String setterName = (String) method.invoke(null, owner, field);
 
         assertEquals("setIsPreviousProblem", setterName);
     }
 
     @Test
     void testSetterNameForFieldPrefersDeclaredBooleanStyleSetter() throws Exception {
-        Method method = UnitTestGenerator.class.getDeclaredMethod("setterNameForField", TypeDeclaration.class, FieldDeclaration.class);
+        Method method = JavaBeansConventions.class.getDeclaredMethod("setterNameForField", TypeDeclaration.class, FieldDeclaration.class);
         method.setAccessible(true);
 
         TypeDeclaration<?> owner = StaticJavaParser.parseBodyDeclaration("""
@@ -564,7 +564,7 @@ class UnitTestGeneratorTest {
                 """).asClassOrInterfaceDeclaration();
         FieldDeclaration field = owner.getFieldByName("isPreviousProblem").orElseThrow();
 
-        String setterName = (String) method.invoke(unitTestGenerator, owner, field);
+        String setterName = (String) method.invoke(null, owner, field);
 
         assertEquals("setPreviousProblem", setterName);
     }

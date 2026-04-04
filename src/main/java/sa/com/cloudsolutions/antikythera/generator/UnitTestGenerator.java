@@ -1225,7 +1225,7 @@ public class UnitTestGenerator extends TestGenerator {
     private void mockFieldWithSetter(String nameAsString, Evaluator eval, TypeDeclaration<?> ownerType, FieldDeclaration field) {
         BlockStmt body = getBody(testMethod);
         String name = field.getVariable(0).getNameAsString();
-        String setterName = setterNameForField(ownerType, field);
+        String setterName = JavaBeansConventions.setterNameForField(ownerType, field);
 
         if (doesFieldNeedMocking(eval, name)) {
             Variable fieldVar = eval.getField(name);
@@ -1253,26 +1253,6 @@ public class UnitTestGenerator extends TestGenerator {
                 }
             }
         }
-    }
-
-    private String setterNameForField(TypeDeclaration<?> owner, FieldDeclaration field) {
-        String fieldName = field.getVariable(0).getNameAsString();
-        String standardSetter = "set" + AbstractCompiler.instanceToClassName(fieldName);
-        String booleanStyleSetter = "set" + AbstractCompiler.setterSuffixFromFieldName(fieldName);
-        if (owner != null && owner.getMethodsByName(standardSetter).stream().anyMatch(md -> md.getParameters().size() == 1)) {
-            return standardSetter;
-        }
-        if (owner != null && owner.getMethodsByName(booleanStyleSetter).stream().anyMatch(md -> md.getParameters().size() == 1)) {
-            return booleanStyleSetter;
-        }
-        Type fieldType = field.getElementType();
-        if (fieldType.isPrimitiveType() && fieldType.asPrimitiveType().getType() == PrimitiveType.Primitive.BOOLEAN) {
-            return booleanStyleSetter;
-        }
-        if (fieldName.startsWith("is") && fieldName.length() > 2 && Character.isUpperCase(fieldName.charAt(2))) {
-            return standardSetter;
-        }
-        return standardSetter;
     }
 
     private boolean doesFieldNeedMocking(Evaluator eval, String name) {
@@ -1393,38 +1373,22 @@ public class UnitTestGenerator extends TestGenerator {
             TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
             body.addStatement(String.format("Mockito.when(%s.%s()).thenReturn(List.of());",
                     nameAsString,
-                    getterMethodNameForField(field)
+                    JavaBeansConventions.getterMethodNameForField(field)
             ));
         }
         else {
             if (value instanceof String) {
                 body.addStatement(String.format("Mockito.when(%s.%s()).thenReturn(\"%s\");",
                         nameAsString,
-                        getterMethodNameForField(field), value));
+                        JavaBeansConventions.getterMethodNameForField(field), value));
             }
             else {
                 body.addStatement(String.format("Mockito.when(%s.%s()).thenReturn(%s);",
                         nameAsString,
-                        getterMethodNameForField(field),
+                        JavaBeansConventions.getterMethodNameForField(field),
                         value instanceof Long ? value + "L" : value.toString()));
             }
         }
-    }
-
-    /**
-     * JavaBeans-style getter name for Mockito stubs ({@code isActive()} for primitive {@code boolean isActive},
-     * {@code getIsActive()} for {@code Boolean isActive}, {@code getFoo()} otherwise).
-     */
-    private static String getterMethodNameForField(FieldDeclaration field) {
-        String fieldName = field.getVariable(0).getNameAsString();
-        Type t = field.getElementType();
-        if (t.isPrimitiveType() && t.asPrimitiveType().getType() == PrimitiveType.Primitive.BOOLEAN) {
-            if (fieldName.startsWith("is") && fieldName.length() > 2 && Character.isUpperCase(fieldName.charAt(2))) {
-                return fieldName;
-            }
-            return "is" + AbstractCompiler.instanceToClassName(fieldName);
-        }
-        return "get" + AbstractCompiler.instanceToClassName(fieldName);
     }
 
     void applyPreconditions() {
