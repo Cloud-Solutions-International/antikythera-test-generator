@@ -487,12 +487,12 @@ public class UnitTestGenerator extends TestGenerator {
         }
 
         for (Parameter param : methodUnderTest.getParameters()) {
-            if (!isCollectionParameter(param.getType())) {
+            if (!TypeInspector.isCollectionParameterType(param.getType())) {
                 continue;
             }
             String name = param.getNameAsString();
             Expression initializer = currentArgs.get(name);
-            if (initializer == null || !isDefinitelyEmptyCollection(initializer)) {
+            if (initializer == null || !CollectionExpressionAnalyzer.isDefinitelyEmptyCollection(initializer)) {
                 continue;
             }
 
@@ -505,27 +505,6 @@ public class UnitTestGenerator extends TestGenerator {
             logger.info("Replaced empty collection argument '{}' with a non-empty invalid sample to preserve exception-path coverage",
                     name);
         }
-    }
-
-    private boolean isCollectionParameter(Type type) {
-        if (!type.isClassOrInterfaceType()) {
-            return false;
-        }
-        String raw = type.asString().replaceAll("<.*>", "").trim();
-        return raw.equals("List") || raw.equals("ArrayList") || raw.equals("Collection")
-                || raw.equals("Set") || raw.equals("HashSet");
-    }
-
-    private boolean isDefinitelyEmptyCollection(Expression expr) {
-        String text = expr.toString().replace(" ", "");
-        if (text.equals("newArrayList<>()") || text.equals("newArrayList()")
-                || text.equals("newHashSet<>()") || text.equals("newHashSet()")
-                || text.equals("List.of()") || text.equals("Set.of()")
-                || text.equals("Collections.emptyList()") || text.equals("Collections.emptySet()")) {
-            return true;
-        }
-        return expr.isObjectCreationExpr() && expr.asObjectCreationExpr().getArguments().isEmpty()
-                && isCollectionParameter(expr.asObjectCreationExpr().getType());
     }
 
     private Expression buildNonEmptyCollectionInitializer(Parameter param) {
@@ -550,7 +529,7 @@ public class UnitTestGenerator extends TestGenerator {
             return null;
         }
 
-        String rawCollectionType = param.getType().asString().replaceAll("<.*>", "").trim();
+        String rawCollectionType = TypeInspector.rawSimpleName(param.getType());
         String collectionInitializer = switch (rawCollectionType) {
             case "Set", "HashSet" -> "new java.util.HashSet<>(java.util.List.of(" + elementInitializer + "))";
             default -> "new java.util.ArrayList<>(java.util.List.of(" + elementInitializer + "))";
@@ -620,7 +599,7 @@ public class UnitTestGenerator extends TestGenerator {
             return false;
         }
         for (Expression expr : currentArgs.values()) {
-            if (expr instanceof NullLiteralExpr || isDefinitelyEmptyCollection(expr)) {
+            if (expr instanceof NullLiteralExpr || CollectionExpressionAnalyzer.isDefinitelyEmptyCollection(expr)) {
                 return false;
             }
         }
@@ -809,7 +788,7 @@ public class UnitTestGenerator extends TestGenerator {
         }
 
         List<FieldDeclaration> collectionFields = typeDecOpt.get().getFields().stream()
-                .filter(f -> isCollectionType(f.getElementType()))
+                .filter(f -> TypeInspector.isCollectionOrMapFieldType(f.getElementType()))
                 .toList();
 
         if (collectionFields.isEmpty()) {
@@ -1230,7 +1209,7 @@ public class UnitTestGenerator extends TestGenerator {
         if (doesFieldNeedMocking(eval, name)) {
             Variable fieldVar = eval.getField(name);
             Object value = fieldVar.getValue();
-            if (value instanceof List || (value == null && isCollectionType(fieldVar.getType()))) {
+            if (value instanceof List || (value == null && TypeInspector.isCollectionOrMapFieldType(fieldVar.getType()))) {
                 TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
                 TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
                 body.addStatement(String.format("%s.%s(new ArrayList());", nameAsString, setterName));
@@ -1263,7 +1242,7 @@ public class UnitTestGenerator extends TestGenerator {
 
         Object value = f.getValue();
         if (value == null) {
-            return isCollectionType(f.getType()) || canInstantiateFieldType(f.getType());
+            return TypeInspector.isCollectionOrMapFieldType(f.getType()) || canInstantiateFieldType(f.getType());
         }
 
         return !(f.getType().isPrimitiveType() && f.getValue().equals(Reflect.getDefault(f.getClazz())));
@@ -1299,7 +1278,7 @@ public class UnitTestGenerator extends TestGenerator {
         if (initializer == null) {
             return null;
         }
-        String rawType = type.asString().replaceAll("<.*>", "").trim();
+        String rawType = TypeInspector.rawSimpleName(type);
         if (rawType.equals("Long") || rawType.equals("long")) {
             if (initializer.isIntegerLiteralExpr()) {
                 return new LongLiteralExpr(initializer.asIntegerLiteralExpr().getValue() + "L");
@@ -1312,16 +1291,8 @@ public class UnitTestGenerator extends TestGenerator {
         return initializer;
     }
 
-    private static boolean isCollectionType(Type type) {
-        String raw = type.asString().replaceAll("<.*>", "").trim();
-        return raw.equals("List") || raw.equals("ArrayList") || raw.equals("LinkedList")
-                || raw.equals("Set") || raw.equals("HashSet") || raw.equals("LinkedHashSet")
-                || raw.equals("Collection") || raw.equals("Map") || raw.equals("HashMap")
-                || raw.equals("LinkedHashMap");
-    }
-
     private boolean canInstantiateFieldType(Type type) {
-        if (type == null || type.isPrimitiveType() || isCollectionType(type)) {
+        if (type == null || type.isPrimitiveType() || TypeInspector.isCollectionOrMapFieldType(type)) {
             return false;
         }
         String raw = type.asString().replaceAll("<.*>", "").trim();

@@ -3,7 +3,6 @@ package sa.com.cloudsolutions.antikythera.generator;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.NullLiteralExpr;
-import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.stmt.IfStmt;
 import com.github.javaparser.ast.stmt.Statement;
 import org.slf4j.Logger;
@@ -175,7 +174,7 @@ public class ExceptionAnalyzer {
         }
 
         // Check if the argument creates an empty collection
-        if (isEmptyCollection(arg)) {
+        if (CollectionExpressionAnalyzer.isDefinitelyEmptyCollection(arg)) {
             logger.info("Test argument '{}' creates empty collection - exception won't trigger", collectionParamName);
             return false;
         }
@@ -210,41 +209,6 @@ public class ExceptionAnalyzer {
         }
         
         return null;
-    }
-
-    /**
-     * Check if an expression creates an empty collection.
-     * 
-     * @param expr The expression to check
-     * @return true if it definitely creates an empty collection
-     */
-    private boolean isEmptyCollection(Expression expr) {
-        if (expr.isObjectCreationExpr()) {
-            ObjectCreationExpr oce = expr.asObjectCreationExpr();
-            String typeName = oce.getType().getNameAsString();
-            
-            // new ArrayList<>(), new HashSet<>(), etc. with no arguments
-            if ((typeName.contains("ArrayList") 
-                 || typeName.contains("LinkedList")
-                 || typeName.contains("HashSet")
-                 || typeName.contains("TreeSet"))
-                && oce.getArguments().isEmpty()) {
-                return true;
-            }
-        }
-        
-        // Check for List.of(), Set.of() with no arguments
-        if (expr.isMethodCallExpr()) {
-            String call = expr.toString();
-            if ((call.equals("List.of()") 
-                 || call.equals("Set.of()")
-                 || call.equals("Collections.emptyList()")
-                 || call.equals("Collections.emptySet()"))) {
-                return true;
-            }
-        }
-        
-        return false;
     }
 
     /**
