@@ -58,6 +58,21 @@ public class JunitAsserter extends Asserter {
             exceptionClass = isWrapperException(actual) ? Exception.class.getName() : actual.getClass().getName();
         }
         /*
+         * NumericComparator used to throw IllegalArgumentException("Cannot compare X and null") while the
+         * JVM throws NullPointerException from Comparable.compareTo(null) or from null Date.toInstant().
+         * The cause may also be a bare IllegalArgumentException (no message) under EvaluatorException.
+         * Generated Mockito tests often hit NPE at runtime; align the expected type.
+         */
+        Throwable deepest = deepestNonWrapperCause(ex);
+        if (deepest instanceof IllegalArgumentException iae) {
+            String msg = iae.getMessage();
+            boolean numericComparatorNullOperand = msg != null && msg.contains("Cannot compare") && msg.contains("null");
+            boolean bareFromEvaluator = (msg == null || msg.isEmpty()) && ex instanceof sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
+            if (numericComparatorNullOperand || bareFromEvaluator) {
+                exceptionClass = NullPointerException.class.getName();
+            }
+        }
+        /*
          * Gson failures are sensitive to mock depth; symbolic evaluation may predict JsonIOException
          * while a well-stubbed test runs cleanly. Prefer assertDoesNotThrow for Gson-related types.
          */
@@ -75,6 +90,17 @@ public class JunitAsserter extends Asserter {
                 || throwable instanceof ExecutionException
                 || throwable instanceof sa.com.cloudsolutions.antikythera.exception.EvaluatorException
                 || throwable instanceof sa.com.cloudsolutions.antikythera.exception.AUTException;
+    }
+
+    private static Throwable deepestNonWrapperCause(Throwable ex) {
+        if (ex == null) {
+            return null;
+        }
+        Throwable t = ex;
+        while (isWrapperException(t) && t.getCause() != null) {
+            t = t.getCause();
+        }
+        return t;
     }
 
 

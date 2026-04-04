@@ -115,10 +115,62 @@ class UnitTestGeneratorTest {
         classUnderTest.addAnnotation("Service");
         MethodDeclaration methodUnderTest = classUnderTest.findFirst(MethodDeclaration.class,
                 md -> md.getNameAsString().equals("queries2")).orElseThrow();
+        unitTestGenerator.addBeforeClass();
         unitTestGenerator.createTests(methodUnderTest, new MethodResponse());
         String sources = unitTestGenerator.getCompilationUnit().toString();
         assertTrue(sources.contains("queries2Test"));
         assertTrue(sources.contains("ReflectionTestUtils"));
+    }
+
+    @Test
+    void testInjectComponentStereotypeUsesReflectionWiring() {
+        var saved = new ArrayList<>(classUnderTest.getAnnotations());
+        try {
+            classUnderTest.getAnnotations().clear();
+            classUnderTest.addAnnotation("Component");
+            MethodDeclaration methodUnderTest = classUnderTest.findFirst(MethodDeclaration.class,
+                    md -> md.getNameAsString().equals("queries2")).orElseThrow();
+            unitTestGenerator.addBeforeClass();
+            unitTestGenerator.createTests(methodUnderTest, new MethodResponse());
+            String sources = unitTestGenerator.getCompilationUnit().toString();
+            assertTrue(sources.contains("queries2Test"));
+            assertTrue(sources.contains("ReflectionTestUtils"));
+            assertTrue(UnitTestGenerator.isSpringStereotypeBean(classUnderTest));
+        } finally {
+            classUnderTest.getAnnotations().clear();
+            classUnderTest.getAnnotations().addAll(saved);
+        }
+    }
+
+    @Test
+    void testInjectValueFieldsInSetUp() {
+        FieldDeclaration valueField = StaticJavaParser.parseBodyDeclaration(
+                "@Value(\"${x}\") private Integer valueInjectedInteger;").asFieldDeclaration();
+        classUnderTest.addMember(valueField);
+        try {
+            classUnderTest.addAnnotation("Service");
+            MethodDeclaration methodUnderTest = classUnderTest.findFirst(MethodDeclaration.class,
+                    md -> md.getNameAsString().equals("queries2")).orElseThrow();
+            unitTestGenerator.addBeforeClass();
+            unitTestGenerator.createTests(methodUnderTest, new MethodResponse());
+            String sources = unitTestGenerator.getCompilationUnit().toString();
+            assertTrue(sources.contains("ReflectionTestUtils.setField(personService, \"valueInjectedInteger\", 0)"),
+                    "Expected @Value field to receive a non-null default via ReflectionTestUtils");
+        } finally {
+            valueField.remove();
+        }
+    }
+
+    @Test
+    void testIsSpringStereotypeBean() {
+        CompilationUnit probe = StaticJavaParser.parse("class Probe {}");
+        ClassOrInterfaceDeclaration p = probe.getType(0).asClassOrInterfaceDeclaration();
+        assertFalse(UnitTestGenerator.isSpringStereotypeBean(p));
+        p.addAnnotation("org.springframework.stereotype.Component");
+        assertTrue(UnitTestGenerator.isSpringStereotypeBean(p));
+        p.getAnnotations().clear();
+        p.addAnnotation("org.springframework.web.bind.annotation.RestController");
+        assertTrue(UnitTestGenerator.isSpringStereotypeBean(p));
     }
 
     @Test

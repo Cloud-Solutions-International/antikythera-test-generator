@@ -14,6 +14,7 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
+import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.BooleanLiteralExpr;
 import com.github.javaparser.ast.expr.CastExpr;
@@ -58,6 +59,7 @@ import sa.com.cloudsolutions.antikythera.evaluator.logging.LogRecorder;
 import sa.com.cloudsolutions.antikythera.evaluator.mock.MockingCall;
 import sa.com.cloudsolutions.antikythera.evaluator.mock.MockingRegistry;
 import sa.com.cloudsolutions.antikythera.exception.AntikytheraException;
+import sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
 import sa.com.cloudsolutions.antikythera.parser.AbstractCompiler;
 import sa.com.cloudsolutions.antikythera.parser.Callable;
 import sa.com.cloudsolutions.antikythera.parser.ImportWrapper;
@@ -394,10 +396,12 @@ public class UnitTestGenerator extends TestGenerator {
         // Check if arguments will trigger exception
         boolean willTrigger = exceptionAnalyzer.willArgumentsTriggerException(ctx, currentArgs);
 
+        boolean illegalArgumentSuppressionApplied = false;
         if (shouldSuppressIllegalArgumentAssertThrows(ctx, currentArgs)) {
             logger.info("Suppressing assertThrows(IllegalArgumentException) for {} — generated setup does not recreate the evaluator-only exception path",
                     methodUnderTest.getNameAsString());
             willTrigger = false;
+            illegalArgumentSuppressionApplied = true;
         }
 
         if (willTrigger && shouldSuppressNoSuchElementAssertThrows(ctx)) {
@@ -408,7 +412,8 @@ public class UnitTestGenerator extends TestGenerator {
         
         logger.info("Exception analysis for {}: type={}, willTrigger={}", 
             methodUnderTest.getNameAsString(), type, willTrigger);
-        
+
+        boolean reinstatedNpe = false;
         if (!willTrigger) {
             // Before treating as success-path, verify the suppression is safe:
             // 1. If the test has NO mock stubs at all, the NPE likely comes from a plain
@@ -419,10 +424,12 @@ public class UnitTestGenerator extends TestGenerator {
                 logger.info("Reinstating assertThrows(NPE) for {} — test has no stubs; plain @Mock returns null at runtime",
                     methodUnderTest.getNameAsString());
                 willTrigger = true;
+                reinstatedNpe = true;
             } else if (hasNullThenReturnStubs()) {
                 logger.info("Reinstating assertThrows(NPE) for {} — test has explicit thenReturn(null) stub; null is real",
                     methodUnderTest.getNameAsString());
                 willTrigger = true;
+                reinstatedNpe = true;
             }
         }
 
@@ -436,6 +443,14 @@ public class UnitTestGenerator extends TestGenerator {
             // Exception will trigger - use normal assertThrows behavior
             logger.debug("Generating assertThrows for {} - exception will be triggered", 
                 methodUnderTest.getNameAsString());
+            if (reinstatedNpe && illegalArgumentSuppressionApplied) {
+                /*
+                 * IAE suppression + reinstatement (no stubs / null stub): response.getException() may still
+                 * carry an evaluator-only IllegalArgumentException cause while the JVM throws NPE from null
+                 * dereferences. Align MethodResponse so JunitAsserter emits NPE.class.
+                 */
+                response.setException(new EvaluatorException("Reinstated assertThrows for runtime NPE", new NullPointerException()));
+            }
             String[] parts = invocation.split("=");
             assertThrows(parts.length == 2 ? parts[1] : parts[0], response);
         }
@@ -596,12 +611,34 @@ public class UnitTestGenerator extends TestGenerator {
         if (hasThenThrowStubs()) {
             return false;
         }
+        /*
+         * extractTestArguments() only sees variable initializers, not request.setFoo(null) style setup.
+         * When the test explicitly assigns null via setters, the CUT often throws a real
+         * IllegalArgumentException (validation) at runtime — do not suppress IAE assertThrows.
+         */
+        if (testMethodHasSetterCallWithNullArgument()) {
+            return false;
+        }
         for (Expression expr : currentArgs.values()) {
             if (expr instanceof NullLiteralExpr || isDefinitelyEmptyCollection(expr)) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * True if the generated @Test method calls a JavaBean-style setter with a null literal.
+     * Excludes Mockito helpers like {@code thenReturn(null)} (not a {@code set*} name).
+     */
+    private boolean testMethodHasSetterCallWithNullArgument() {
+        for (MethodCallExpr mce : testMethod.findAll(MethodCallExpr.class)) {
+            if (mce.getNameAsString().startsWith("set")
+                    && mce.getArguments().stream().anyMatch(Expression::isNullLiteralExpr)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean shouldSuppressNoSuchElementAssertThrows(ExceptionContext ctx) {
@@ -901,13 +938,37 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     /**
+     * Spring stereotype beans receive the same mock wiring as {@code @Service}: a shared field on the
+     * test class plus {@code ReflectionTestUtils.setField} in {@code @BeforeEach}.
+     */
+    static boolean isSpringStereotypeBean(ClassOrInterfaceDeclaration decl) {
+        if (decl == null) {
+            return false;
+        }
+        return decl.getAnnotations().stream().anyMatch(UnitTestGenerator::isSpringStereotypeAnnotation);
+    }
+
+    private static boolean isSpringStereotypeAnnotation(AnnotationExpr ann) {
+        String name = ann.getNameAsString();
+        if (name.equals("Service") || name.equals("Component") || name.equals("Repository")
+                || name.equals("Controller") || name.equals("RestController")) {
+            return true;
+        }
+        if (name.equals("org.springframework.web.bind.annotation.RestController")) {
+            return true;
+        }
+        return name.startsWith("org.springframework.stereotype.")
+                && (name.endsWith(".Service") || name.endsWith(".Component") || name.endsWith(".Repository")
+                || name.endsWith(".Controller"));
+    }
+
+    /**
      * Creates an instance of the class under test
      */
     @SuppressWarnings("unchecked")
     void createInstance() {
         methodUnderTest.findAncestor(ClassOrInterfaceDeclaration.class).ifPresent(c -> {
-            if (c.getAnnotationByName("Service").isPresent()
-                    || c.getAnnotationByName("org.springframework.stereotype.Service").isPresent()) {
+            if (isSpringStereotypeBean(c)) {
                 injectMocks(c);
             } else {
                 instanceName = AbstractCompiler.classToInstanceName(c.getNameAsString());
@@ -1806,44 +1867,41 @@ public class UnitTestGenerator extends TestGenerator {
      * This approach guarantees field injection works even with duplicate field types (e.g., two PatientPOMRDao fields).
      */
     private void injectMockedFieldsViaReflection(BlockStmt beforeBody) {
-        // Find the service class name from the compilation unit being tested
+        ClassOrInterfaceDeclaration bean = null;
         String serviceClassName = null;
-        
+
         for (TypeDeclaration<?> type : compilationUnitUnderTest.getTypes()) {
-            if (type.isAnnotationPresent("Service") || type.isAnnotationPresent("org.springframework.stereotype.Service")) {
+            if (type instanceof ClassOrInterfaceDeclaration c && isSpringStereotypeBean(c)) {
+                bean = c;
                 serviceClassName = type.getNameAsString();
                 break;
             }
         }
-        
-        if (serviceClassName == null) {
+
+        if (serviceClassName == null || bean == null) {
             return;
         }
-        
+
         String serviceInstanceName = AbstractCompiler.classToInstanceName(serviceClassName);
-        
+
         // Find all mocked fields from gen (test class CompilationUnit)
         List<String> mockedFieldNames = new ArrayList<>();
         for (TypeDeclaration<?> testType : gen.getTypes()) {
             for (FieldDeclaration field : testType.getFields()) {
                 boolean hasMockAnnotation = field.getAnnotations().stream()
                         .anyMatch(ann -> ann.getNameAsString().equals("Mock") || ann.getNameAsString().equals("MockBean"));
-                
+
                 if (hasMockAnnotation) {
                     mockedFieldNames.add(field.getVariable(0).getNameAsString());
                 }
             }
         }
-        
-        if (mockedFieldNames.isEmpty()) {
-            return;
-        }
-        
-        // Instantiate the service: serviceInstance = new ServiceClass();
+
+        // Always instantiate the stereotype bean; @Component classes with no @Autowired fields still need `new` in setUp.
         ObjectCreationExpr newInstance = new ObjectCreationExpr(null, new ClassOrInterfaceType(serviceClassName), new NodeList<>());
         AssignExpr instantiation = new AssignExpr(new NameExpr(serviceInstanceName), newInstance, AssignExpr.Operator.ASSIGN);
         beforeBody.addStatement(instantiation);
-        
+
         // Generate setField calls for each mocked field
         for (String fieldName : mockedFieldNames) {
             MethodCallExpr setFieldCall = new MethodCallExpr(
@@ -1857,6 +1915,73 @@ public class UnitTestGenerator extends TestGenerator {
             );
             beforeBody.addStatement(setFieldCall);
         }
+
+        injectValueFieldsViaReflection(beforeBody, bean, serviceInstanceName);
+    }
+
+    /**
+     * Plain {@code new} stereotype tests do not run in a Spring context, so {@code @Value} fields stay null and
+     * unboxing throws {@link NullPointerException}. Mirror Spring defaults with small literals (same idea as
+     * {@link #mockSimpleArgument(Parameter, String, Type)} for parameters).
+     */
+    private void injectValueFieldsViaReflection(BlockStmt beforeBody, ClassOrInterfaceDeclaration bean,
+                                                String serviceInstanceName) {
+        for (var member : bean.getMembers()) {
+            if (!(member instanceof FieldDeclaration fd)) {
+                continue;
+            }
+            if (fd.isStatic() || fd.hasModifier(Modifier.Keyword.FINAL)) {
+                continue;
+            }
+            if (!isSpringFieldValueAnnotation(fd)) {
+                continue;
+            }
+            for (VariableDeclarator var : fd.getVariables()) {
+                valueFieldInitializerLiteral(fd.getElementType()).ifPresent(init ->
+                        beforeBody.addStatement(String.format(
+                                "ReflectionTestUtils.setField(%s, \"%s\", %s);",
+                                serviceInstanceName, var.getNameAsString(), init)));
+            }
+        }
+    }
+
+    private static boolean isSpringFieldValueAnnotation(FieldDeclaration fd) {
+        return fd.getAnnotations().stream().anyMatch(a -> {
+            String n = a.getNameAsString();
+            return n.equals("Value") || n.endsWith(".Value");
+        });
+    }
+
+    /**
+     * @return a literal suitable for {@code ReflectionTestUtils.setField} for supported {@code @Value} types only.
+     */
+    private static Optional<String> valueFieldInitializerLiteral(Type type) {
+        if (type instanceof PrimitiveType p) {
+            return Optional.of(switch (p.getType()) {
+                case BOOLEAN -> "false";
+                case BYTE -> "(byte)0";
+                case SHORT -> "(short)0";
+                case INT -> "0";
+                case LONG -> "0L";
+                case FLOAT -> "0.0f";
+                case DOUBLE -> "0.0";
+                case CHAR -> "'\\0'";
+            });
+        }
+        if (type.isClassOrInterfaceType()) {
+            String name = type.asClassOrInterfaceType().getNameAsString();
+            return Optional.ofNullable(switch (name) {
+                case "Integer", "Byte", "Short" -> "0";
+                case "Long" -> "0L";
+                case "Boolean" -> "false";
+                case "Character" -> "'\\0'";
+                case "Double" -> "0.0";
+                case "Float" -> "0.0f";
+                case "String" -> "\"\"";
+                default -> null;
+            });
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -1959,8 +2084,7 @@ public class UnitTestGenerator extends TestGenerator {
     private void identifyFieldsToBeMocked(CompilationUnit cu) {
 
         for (TypeDeclaration<?> decl : cu.getTypes()) {
-            if (decl.isAnnotationPresent("org.springframework.stereotype.Service")
-                    || decl.isAnnotationPresent("Service")) {
+            if (decl instanceof ClassOrInterfaceDeclaration c && isSpringStereotypeBean(c)) {
                 detectConstructorInjection(cu, decl);
             }
 
