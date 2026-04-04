@@ -2128,15 +2128,15 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     /**
-     * DAOs and repositories generally benefit from deep stubs. Client dependencies do too, with a
-     * narrow exception for ProblemFeignClient where plain mocks preserve the intended failure-path
-     * behavior in generated tests.
+     * DAOs and repositories generally benefit from deep stubs. Dependencies whose simple name ends in
+     * {@code Client} do too, unless listed in {@link Settings#PLAIN_MOCK_DEPENDENCY_SIMPLE_NAMES}
+     * ({@code plain_mock_dependency_simple_names} in {@code generator.yml}).
      */
     private static void applyMockAnnotationForDependencyType(FieldDeclaration field, Type elementType) {
         if (elementType.isClassOrInterfaceType()) {
             String simple = elementType.asClassOrInterfaceType().getNameAsString();
             if (simple.endsWith("Dao") || simple.endsWith("Repository")
-                    || (simple.endsWith("Client") && !simple.equals("ProblemFeignClient"))) {
+                    || (simple.endsWith("Client") && !isPlainMockDependencySimpleName(simple))) {
                 field.addAnnotation(new NormalAnnotationExpr(new Name("Mock"), new NodeList<>(
                         new MemberValuePair("answer", new FieldAccessExpr(new NameExpr("Answers"), "RETURNS_DEEP_STUBS"))
                 )));
@@ -2145,6 +2145,11 @@ public class UnitTestGenerator extends TestGenerator {
             }
         }
         field.addAnnotation(MOCK);
+    }
+
+    private static boolean isPlainMockDependencySimpleName(String simpleTypeName) {
+        return Settings.getPropertyList(Settings.PLAIN_MOCK_DEPENDENCY_SIMPLE_NAMES, String.class).stream()
+                .anyMatch(simpleTypeName::equals);
     }
 
     private void detectConstructorInjection(CompilationUnit cu, TypeDeclaration<?> decl) {
