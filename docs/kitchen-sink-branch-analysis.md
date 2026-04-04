@@ -2,7 +2,7 @@
 
 #### 1. **Single Responsibility Principle Violation**
 
-**Problem:** `UnitTestGenerator` grew from ~400 to ~1,400 lines.
+**Problem:** `UnitTestGenerator` has grown to on the order of **~2,300 lines** (historically ~400; count drifts—verify with `wc -l` on `UnitTestGenerator.java`).
 
 **Responsibilities:**
 - Test method creation
@@ -37,17 +37,17 @@ class SetterResolverService {
     Optional<Type> resolveParameterType(TypeDeclaration<?> owner, String methodName);
 }
 
-class TestSetupBuilder {
+class BeforeEachSetupHelper {
     MethodDeclaration buildBeforeEach(List<FieldDeclaration> mocks, List<ValueField> values);
 }
 ```
 
 #### 2. **Code Duplication**
 
-**A. Setter/Getter Name Resolution** (3+ locations):
-- `setterNameForField()` (line ~735)
-- `getterMethodNameForField()` (line ~1248)
-- Similar logic in `normalizeSetterPrecondition()`
+**A. Setter/Getter Name Resolution** (3+ locations in `UnitTestGenerator`):
+- `setterNameForField()`
+- `getterMethodNameForField()`
+- Related logic in `normalizeSetterPrecondition()`
 
 **Recommendation:**
 ```java
@@ -75,16 +75,15 @@ class TypeInspector {
 }
 ```
 
-**C. Empty Collection Detection** (3+ locations):
-- `isDefinitelyEmptyCollection()` in `ExceptionAnalyzer`
-- `isEmptyCollection()` in `ExceptionAnalyzer` (different method!)
-- Similar logic in `UnitTestGenerator`
+**C. Empty Collection Detection** (overlapping logic across classes):
+- `isDefinitelyEmptyCollection()` in `UnitTestGenerator`
+- `isEmptyCollection()` in `ExceptionAnalyzer` (separate implementation, same broad purpose)
 
 **Recommendation:** Consolidate into `CollectionExpressionAnalyzer`
 
 #### 3. **Deep Nesting & Complexity**
 
-**Critical Method:** `handleExceptionResponse()` (lines ~356-449, ~95 lines)
+**Critical Method:** `handleExceptionResponse()` — about **90–100 lines** of branching (exact span drifts; search by method name in `UnitTestGenerator`)
 
 **Issues:**
 - Cyclomatic complexity: ~15-20
@@ -134,40 +133,16 @@ handleExceptionResponse(response, invocation) {
 }
 ```
 
-**Recommendation:** Strategy Pattern
-
-```java
-interface ExceptionAssertionStrategy {
-    void apply(MethodResponse response, String invocation, BlockStmt testBody);
-}
-
-class AssertThrowsStrategy implements ExceptionAssertionStrategy { ... }
-class AssertDoesNotThrowStrategy implements ExceptionAssertionStrategy { ... }
-class AssertSuccessStrategy implements ExceptionAssertionStrategy { ... }
-
-class ExceptionAssertionDecider {
-    ExceptionAssertionStrategy decide(ExceptionContext ctx, TestArguments args) {
-        // Clean decision logic without side effects
-        if (shouldUseNoAssertion(ctx, args)) return NO_ASSERTION;
-        if (shouldUseDoesNotThrow(ctx, args)) return DOES_NOT_THROW;
-        if (shouldUseThrows(ctx, args)) return THROWS;
-        return SUCCESS_PATH;
-    }
-}
-
-// Usage in UnitTestGenerator:
-ExceptionAssertionStrategy strategy = decider.decide(ctx, args);
-strategy.apply(response, invocation, testMethod.getBody());
-```
+**Recommendation:** Extract a **single collaborator** (e.g. `ExceptionResponseAsserter`) with **private helpers** and/or a small **outcome enum** (`assertThrows` vs `addAsserts` vs legacy path). Avoid a Strategy/Chain framework unless the rule set keeps growing and tests prove you need plug-in style handlers.
 
 #### 4. **Method Length Violations**
 
-Methods exceeding 50 lines:
-- `handleExceptionResponse()` - 95 lines
-- `injectMockedFieldsViaReflection()` - 60 lines
-- `normalizeInlineObjectCreationNulls()` - 70 lines
-- `mockFieldWithSetter()` - 40 lines
-- `createFieldInitializer()` - 50 lines
+Long methods (approximate body length in the current `UnitTestGenerator`; re-measure after edits):
+- `handleExceptionResponse()` — ~95 lines
+- `injectMockedFieldsViaReflection()` — ~50 lines
+- `normalizeInlineObjectCreationNulls()` — ~30 lines
+- `mockFieldWithSetter()` — ~30 lines
+- `createFieldInitializer()` — ~20 lines (nearby helpers add more surface area)
 
 **Recommendation:** Apply Extract Method refactoring to each
 
@@ -230,31 +205,9 @@ class UnitTestGenerator {
 
 #### 7. **Lack of Interface Segregation**
 
-**Problem:** `UnitTestGenerator` exposes ~80 public/package methods without clear contracts.
+**Problem:** `UnitTestGenerator` exposes a **large method surface** (on the order of **~100** methods) with many package-visible entry points and no narrow interfaces.
 
-**Recommendation:**
-```java
-interface TestSetupPhase {
-    void identifyFieldsToBeMocked();
-    void loadPredefinedBaseClass();
-    void addBeforeClass();
-}
-
-interface TestExecutionPhase {
-    void createTests(MethodDeclaration method, MethodResponse response);
-    void mockArguments();
-    void createInstance();
-}
-
-interface TestAssertionPhase {
-    void addAsserts(MethodResponse response, String invocation);
-    void assertThrows(String invocation, MethodResponse response);
-}
-
-class UnitTestGenerator implements TestSetupPhase, TestExecutionPhase, TestAssertionPhase {
-    // Clearer contract boundaries
-}
-```
+**Recommendation:** Prefer **package-private collaborators** (`MockFieldSupport`, assertion helper) over many narrow interfaces on `UnitTestGenerator` unless several generators must share the same contract.
 
 ---
 
@@ -262,7 +215,7 @@ class UnitTestGenerator implements TestSetupPhase, TestExecutionPhase, TestAsser
 
 | Principle | Grade | Rationale |
 |-----------|-------|-----------|
-| **Single Responsibility** | C | `UnitTestGenerator` violates (1,400 lines, 12+ responsibilities); new classes (`TargetClassifier`, `ExceptionAnalyzer`) exemplary |
+| **Single Responsibility** | C | `UnitTestGenerator` violates (~2,300 lines, many responsibilities); newer types (`TargetClassifier`, `ExceptionAnalyzer`) are more focused |
 | **Open/Closed** | B+ | Enums enable extension without modification; some hardcoded logic in giant methods |
 | **Liskov Substitution** | A | Inheritance hierarchies respected; no LSP violations detected |
 | **Interface Segregation** | C | `UnitTestGenerator` too broad; `ITestGenerator` minimal; new classes focused |
@@ -274,678 +227,64 @@ class UnitTestGenerator implements TestSetupPhase, TestExecutionPhase, TestAsser
 
 ## Refactoring Recommendations
 
-### 🎯 Strategic Approach: Pattern-Driven Architecture
+### Principles
 
-The current "extract services" approach is a good first step, but applying **established Gang of Four design patterns** will provide better structure, clearer intent, and easier maintainability. This section presents a pattern-driven refactoring strategy.
+- Prefer **plain extractions** (helpers, small types, `record`s where they clarify data) over adopting named GoF patterns as a goal.
+- **JavaParser already builds ASTs**; do not add a parallel fluent Builder API unless a pilot on one code path shows clear duplication reduction.
+- **Refactor for duplication and clarity**, not for pattern checklists.
 
----
+### Priority: utilities and constants (highest ROI)
 
-### Priority 1: Apply Facade + Template Method Pattern
+Consolidate without new architecture:
 
-**Goal:** Transform `UnitTestGenerator` from a 1,400-line monolith into a high-level **Facade** that orchestrates specialized subsystems.
+- **`JavaBeansConventions`** — getter/setter naming (replaces scattered logic in `UnitTestGenerator`).
+- **`TypeInspector`** (or extend an existing helper) — collection/map raw-type checks used in many places.
+- **`CollectionExpressionAnalyzer`** — one place for "empty collection" heuristics shared by `UnitTestGenerator` and `ExceptionAnalyzer` where possible.
+- **`TestGenerationConstants`** — paths, annotation simple names, common placeholders.
 
-#### Architecture Overview
+### Priority: exception path in generated tests
 
-```java
-// UnitTestGenerator becomes a clean Facade
-public class UnitTestGenerator implements ITestGenerator {
-    private final TestGenerationPipeline pipeline;
-    private final TestComponentFactory componentFactory;
-    
-    public UnitTestGenerator(CompilationUnit cu, Settings settings, AntikytheraRunTime runtime) {
-        this.componentFactory = new JUnit5ComponentFactory(settings);
-        this.pipeline = new UnitTestGenerationPipeline(cu, componentFactory, runtime, settings);
-    }
-    
-    @Override
-    public void generate() {
-        pipeline.execute();
-    }
-}
+- Extract **`ExceptionResponseAsserter`** (name TBD): one class used from `UnitTestGenerator` that:
+  - Computes what to do (e.g. `assertThrows` vs success-path asserts) using **private methods** and optionally a **small enum** for the outcome.
+  - Keeps **side effects** (e.g. re-seeding collection arguments) explicit and documented.
+- **Do not** introduce Strategy interfaces, handler chains, or a pluggable `decision.apply()` model unless the rules keep changing independently.
 
-// Template Method Pattern - defines the generation algorithm
-abstract class TestGenerationPipeline {
-    protected final TypeInspector typeInspector;
-    protected final MockConfigurationService mockService;
-    protected final TestMethodBuilder methodBuilder;
-    protected final AssertionOrchestrator assertionOrchestrator;
-    
-    // Template method - defines invariant workflow
-    public final void execute() {
-        ClassOrInterfaceDeclaration testClass = initializeTestClass();
-        identifyAndConfigureMocks(testClass);
-        generateTestMethods(testClass);
-        finalizeTestClass(testClass);
-    }
-    
-    // Hook methods - allow customization
-    protected abstract void identifyAndConfigureMocks(ClassOrInterfaceDeclaration testClass);
-    protected abstract void finalizeTestClass(ClassOrInterfaceDeclaration testClass);
-}
+### Priority: mock and setup wiring (if still hard to navigate after utilities)
 
-// Concrete implementation
-class UnitTestGenerationPipeline extends TestGenerationPipeline {
-    @Override
-    protected void identifyAndConfigureMocks(ClassOrInterfaceDeclaration testClass) {
-        mockService.identifyMockableFields(sourceClass);
-        mockService.addMockAnnotations(testClass);
-        mockService.buildSetupMethod(testClass);
-    }
-}
-```
+- Move chunks of mock identification, reflection injection, and setter-based mock setup into **one or two package-private types** (e.g. `MockFieldSupport`).
+- **Defer** mock-injection "strategies" until a third real injection style appears or the same conditional ladder churns every sprint.
 
-**Benefits:**
-- **Single Responsibility:** Each subsystem has one clear job
-- **Open/Closed:** New test types via subclassing, not modification
-- **Testability:** Mock individual subsystems, not entire generator
+### Priority: dependency injection (optional)
 
----
+- Passing collaborators through **constructors** is worthwhile when you need isolated unit tests of generator pieces.
+- Avoid a large **factory + pipeline class hierarchy** until more than one generation workflow truly shares the same steps.
 
-### Priority 2: Strategy Pattern for Variation Points
+### Explicitly out of scope for this plan
 
-**Goal:** Replace nested conditionals with pluggable strategies for cross-cutting concerns.
+- **Facade + Template Method** pipeline base class and subclasses.
+- **Fluent `TestMethodBuilder` / Given–When–Then** layers on top of JavaParser.
+- **AssertionStrategy** / **MockInjectionStrategy** registries and **Chain-of-Responsibility** handler hierarchies.
+- Success metrics based on **how many named patterns** appear in code.
 
-#### A. Mock Injection Strategies
+### Optional sketch (exception helper)
 
 ```java
-interface MockInjectionStrategy {
-    boolean supports(FieldDeclaration field, TypeDeclaration<?> owner);
-    void inject(FieldDeclaration field, ClassOrInterfaceDeclaration testClass, String instanceName);
-}
-
-class ConstructorInjectionStrategy implements MockInjectionStrategy {
-    @Override
-    public boolean supports(FieldDeclaration field, TypeDeclaration<?> owner) {
-        return owner.getConstructors().stream()
-            .anyMatch(c -> hasMatchingParameter(c, field));
-    }
-    
-    @Override
-    public void inject(FieldDeclaration field, ClassOrInterfaceDeclaration testClass, String instanceName) {
-        // Add @InjectMocks to test class field
-        // No setup code needed - Mockito handles it
-    }
-}
-
-class SetterInjectionStrategy implements MockInjectionStrategy {
-    private final JavaBeansConventions conventions;
-    
-    @Override
-    public boolean supports(FieldDeclaration field, TypeDeclaration<?> owner) {
-        String setterName = conventions.setterName(field);
-        return owner.getMethodsByName(setterName).size() > 0;
-    }
-    
-    @Override
-    public void inject(FieldDeclaration field, ClassOrInterfaceDeclaration testClass, String instanceName) {
-        // Generate: instance.setFieldName(mockField);
-        MethodDeclaration setup = testClass.getMethodsByName("setUp").get(0);
-        String setterCall = instanceName + "." + conventions.setterName(field) + "(" + field.getVariable(0).getNameAsString() + ")";
-        setup.getBody().get().addStatement(setterCall);
-    }
-}
-
-class ReflectionInjectionStrategy implements MockInjectionStrategy {
-    @Override
-    public boolean supports(FieldDeclaration field, TypeDeclaration<?> owner) {
-        return true; // Fallback - always works
-    }
-    
-    @Override
-    public void inject(FieldDeclaration field, ClassOrInterfaceDeclaration testClass, String instanceName) {
-        // Generate: ReflectionTestUtils.setField(instance, "fieldName", mockField);
-        // (current implementation)
-    }
-}
-
-// Strategy selector
-class MockInjectionStrategySelector {
-    private final List<MockInjectionStrategy> strategies = Arrays.asList(
-        new ConstructorInjectionStrategy(),
-        new SetterInjectionStrategy(new JavaBeansConventions()),
-        new ReflectionInjectionStrategy()
-    );
-    
-    public MockInjectionStrategy select(FieldDeclaration field, TypeDeclaration<?> owner) {
-        return strategies.stream()
-            .filter(s -> s.supports(field, owner))
-            .findFirst()
-            .orElseThrow();
-    }
-}
-```
-
-#### B. Assertion Strategies
-
-```java
-interface AssertionStrategy {
-    boolean handles(MethodResponse response);
-    void addAssertions(MethodResponse response, String invocation, BlockStmt testBody);
-}
-
-class ExceptionAssertionStrategy implements AssertionStrategy {
-    private final ExceptionDecisionEngine decisionEngine;
-    
-    @Override
-    public boolean handles(MethodResponse response) {
-        return response.isException();
-    }
-    
-    @Override
-    public void addAssertions(MethodResponse response, String invocation, BlockStmt testBody) {
-        ExceptionContext ctx = response.getExceptionContext();
-        TestArguments args = extractArguments(testBody);
-        
-        AssertionDecision decision = decisionEngine.decide(ctx, args);
-        decision.apply(response, invocation, testBody);
-    }
-}
-
-class VoidMethodAssertionStrategy implements AssertionStrategy {
-    private final SideEffectDetector sideEffectDetector;
-    
-    @Override
-    public boolean handles(MethodResponse response) {
-        return response.isVoid();
-    }
-    
-    @Override
-    public void addAssertions(MethodResponse response, String invocation, BlockStmt testBody) {
-        List<SideEffect> effects = sideEffectDetector.detect(response);
-        
-        for (SideEffect effect : effects) {
-            if (effect instanceof SystemOutEffect) {
-                testBody.addStatement("// Verify System.out output");
-            } else if (effect instanceof LoggingEffect) {
-                testBody.addStatement("// Verify log statement");
-            }
+// Illustrative only — names and signatures TBD
+final class ExceptionResponseAsserter {
+    void handle(MethodResponse response, String invocation,
+                MethodDeclaration testMethod, MethodDeclaration methodUnderTest) {
+        Outcome o = resolveOutcome(response, testMethod);
+        switch (o) {
+            case ASSERT_THROWS -> { /* emit assertThrows */ }
+            case SUCCESS_PATH_ASSERTS -> { /* addAsserts */ }
+            case LEGACY -> { /* previous behavior */ }
         }
     }
-}
-
-class FieldAssertionStrategy implements AssertionStrategy {
-    @Override
-    public boolean handles(MethodResponse response) {
-        return response.hasReturnValue() && response.getReturnValue() instanceof Variable;
-    }
-    
-    @Override
-    public void addAssertions(MethodResponse response, String invocation, BlockStmt testBody) {
-        Variable result = (Variable) response.getReturnValue();
-        // Current field-by-field assertion logic
-    }
-}
-
-// Strategy orchestrator
-class AssertionOrchestrator {
-    private final List<AssertionStrategy> strategies = Arrays.asList(
-        new ExceptionAssertionStrategy(new ExceptionDecisionEngine()),
-        new VoidMethodAssertionStrategy(new SideEffectDetector()),
-        new FieldAssertionStrategy(),
-        new ScalarAssertionStrategy()
-    );
-    
-    public void addAssertions(MethodResponse response, String invocation, BlockStmt testBody) {
-        strategies.stream()
-            .filter(s -> s.handles(response))
-            .findFirst()
-            .ifPresent(s -> s.addAssertions(response, invocation, testBody));
-    }
+    private Outcome resolveOutcome(...) { /* private helpers */ }
+    private enum Outcome { ASSERT_THROWS, SUCCESS_PATH_ASSERTS, LEGACY }
 }
 ```
 
----
-
-### Priority 3: Chain of Responsibility for Exception Analysis
-
-**Goal:** Replace 95-line `handleExceptionResponse()` with a clean, extensible analysis pipeline.
-
-```java
-interface ExceptionAnalysisHandler {
-    AssertionDecision handle(ExceptionContext ctx, TestArguments args);
-}
-
-// Abstract base with chaining support
-abstract class AbstractExceptionHandler implements ExceptionAnalysisHandler {
-    protected ExceptionAnalysisHandler next;
-    
-    public void setNext(ExceptionAnalysisHandler next) {
-        this.next = next;
-    }
-    
-    @Override
-    public AssertionDecision handle(ExceptionContext ctx, TestArguments args) {
-        if (canHandle(ctx, args)) {
-            return doHandle(ctx, args);
-        }
-        return next != null ? next.handle(ctx, args) : AssertionDecision.ASSERT_THROWS;
-    }
-    
-    protected abstract boolean canHandle(ExceptionContext ctx, TestArguments args);
-    protected abstract AssertionDecision doHandle(ExceptionContext ctx, TestArguments args);
-}
-
-// Concrete handlers
-class IllegalArgumentSuppressionHandler extends AbstractExceptionHandler {
-    @Override
-    protected boolean canHandle(ExceptionContext ctx, TestArguments args) {
-        return ctx.getExceptionType() == ExceptionType.ILLEGAL_ARGUMENT
-            && args.containsNullLiteral();
-    }
-    
-    @Override
-    protected AssertionDecision doHandle(ExceptionContext ctx, TestArguments args) {
-        // Suppress IAE when null arguments are involved
-        return AssertionDecision.NO_ASSERTION;
-    }
-}
-
-class NoSuchElementSuppressionHandler extends AbstractExceptionHandler {
-    @Override
-    protected boolean canHandle(ExceptionContext ctx, TestArguments args) {
-        return ctx.getExceptionType() == ExceptionType.NO_SUCH_ELEMENT
-            && args.hasEmptyCollections();
-    }
-    
-    @Override
-    protected AssertionDecision doHandle(ExceptionContext ctx, TestArguments args) {
-        return AssertionDecision.NO_ASSERTION;
-    }
-}
-
-class NullPointerReinstatementHandler extends AbstractExceptionHandler {
-    @Override
-    protected boolean canHandle(ExceptionContext ctx, TestArguments args) {
-        return ctx.getExceptionType() == ExceptionType.NULL_POINTER
-            && !mockSetupHasStubs();
-    }
-    
-    @Override
-    protected AssertionDecision doHandle(ExceptionContext ctx, TestArguments args) {
-        // Reinstate NPE when no stubs configured
-        return AssertionDecision.ASSERT_THROWS;
-    }
-}
-
-// Decision engine using chain
-class ExceptionDecisionEngine {
-    private final ExceptionAnalysisHandler chain;
-    
-    public ExceptionDecisionEngine() {
-        // Build the chain
-        IllegalArgumentSuppressionHandler iae = new IllegalArgumentSuppressionHandler();
-        NoSuchElementSuppressionHandler nse = new NoSuchElementSuppressionHandler();
-        NullPointerReinstatementHandler npe = new NullPointerReinstatementHandler();
-        
-        iae.setNext(nse);
-        nse.setNext(npe);
-        
-        this.chain = iae;
-    }
-    
-    public AssertionDecision decide(ExceptionContext ctx, TestArguments args) {
-        return chain.handle(ctx, args);
-    }
-}
-```
-
-**Before/After Comparison:**
-
-```java
-// BEFORE: 95 lines of nested ifs
-handleExceptionResponse(response, invocation) {
-    if (ctx == null) { fallback; return; }
-    type = analyzeException(ctx);
-    currentArgs = extractTestArguments();
-    seedCollectionArguments(ctx, currentArgs);
-    currentArgs = extractTestArguments();
-    willTrigger = analyzeWillTrigger(ctx, currentArgs);
-    if (shouldSuppressIAE(ctx, currentArgs)) {
-        willTrigger = false;
-        illegalArgumentSuppressionApplied = true;
-    }
-    // ... 60+ more lines
-}
-
-// AFTER: 5 lines
-handleExceptionResponse(response, invocation) {
-    ExceptionContext ctx = response.getExceptionContext();
-    TestArguments args = extractArguments();
-    AssertionDecision decision = exceptionDecisionEngine.decide(ctx, args);
-    decision.apply(response, invocation, testBody);
-}
-```
-
----
-
-### Priority 4: Builder Pattern for Test Construction
-
-**Goal:** Replace scattered test-building code with fluent, composable builders.
-
-```java
-class TestMethodBuilder {
-    private String name;
-    private final List<Statement> givenStatements = new ArrayList<>();
-    private Statement whenStatement;
-    private final List<Statement> thenStatements = new ArrayList<>();
-    private final TestComponentFactory componentFactory;
-    
-    public TestMethodBuilder withName(String name) {
-        this.name = name;
-        return this;
-    }
-    
-    public TestMethodBuilder given(Consumer<GivenBuilder> setup) {
-        GivenBuilder builder = new GivenBuilder(componentFactory);
-        setup.accept(builder);
-        givenStatements.addAll(builder.build());
-        return this;
-    }
-    
-    public TestMethodBuilder when(String invocation) {
-        this.whenStatement = componentFactory.createInvocation(invocation);
-        return this;
-    }
-    
-    public TestMethodBuilder then(Consumer<ThenBuilder> assertions) {
-        ThenBuilder builder = new ThenBuilder(componentFactory);
-        assertions.accept(builder);
-        thenStatements.addAll(builder.build());
-        return this;
-    }
-    
-    public MethodDeclaration build() {
-        MethodDeclaration method = componentFactory.createTestMethod(name);
-        BlockStmt body = method.getBody().get();
-        
-        // Given
-        givenStatements.forEach(body::addStatement);
-        body.addStatement(new EmptyStmt()); // Blank line
-        
-        // When
-        body.addStatement(whenStatement);
-        body.addStatement(new EmptyStmt());
-        
-        // Then
-        thenStatements.forEach(body::addStatement);
-        
-        return method;
-    }
-}
-
-// Usage
-MethodDeclaration testMethod = new TestMethodBuilder()
-    .withName("testGetUserById_Success")
-    .given(setup -> {
-        setup.mockReturn("userRepository.findById(1L)", testUser);
-        setup.mockReturn("cacheService.get(\"user:1\")", null);
-    })
-    .when("userService.getUserById(1L)")
-    .then(assertions -> {
-        assertions.assertNotNull("result");
-        assertions.assertFieldEquals("result.name", "John Doe");
-        assertions.verifyMockCalled("userRepository.findById(1L)", times(1));
-    })
-    .build();
-```
-
----
-
-### Priority 5: Utility Consolidation (Eliminate Duplication)
-
-**Goal:** Consolidate duplicated code into focused utility classes.
-
-```java
-// JavaBeans naming conventions (replaces 3+ duplicated methods)
-class JavaBeansConventions {
-    public static String getterName(FieldDeclaration field) {
-        String fieldName = field.getVariable(0).getNameAsString();
-        String capitalized = StringUtils.capitalize(fieldName);
-        
-        if (isBooleanType(field)) {
-            return "is" + capitalized;
-        }
-        return "get" + capitalized;
-    }
-    
-    public static String setterName(FieldDeclaration field) {
-        String fieldName = field.getVariable(0).getNameAsString();
-        return "set" + StringUtils.capitalize(fieldName);
-    }
-    
-    private static boolean isBooleanType(FieldDeclaration field) {
-        String type = field.getElementType().asString();
-        return type.equals("boolean") || type.equals("Boolean");
-    }
-}
-
-// Type inspection (replaces 5+ duplicated type checks)
-class TypeInspector {
-    private static final Set<String> COLLECTION_TYPES = Set.of(
-        "List", "ArrayList", "LinkedList", "Vector",
-        "Set", "HashSet", "TreeSet", "LinkedHashSet",
-        "Collection"
-    );
-    
-    private static final Set<String> MAP_TYPES = Set.of(
-        "Map", "HashMap", "TreeMap", "LinkedHashMap", "Hashtable"
-    );
-    
-    public static boolean isCollectionType(Type type) {
-        String simpleName = type.asString().replaceAll("<.*>", "");
-        return COLLECTION_TYPES.contains(simpleName);
-    }
-    
-    public static boolean isMapType(Type type) {
-        String simpleName = type.asString().replaceAll("<.*>", "");
-        return MAP_TYPES.contains(simpleName);
-    }
-    
-    public static CollectionFamily getFamily(Type type) {
-        if (isCollectionType(type)) return CollectionFamily.LIST;
-        if (isMapType(type)) return CollectionFamily.MAP;
-        return CollectionFamily.NONE;
-    }
-}
-
-// Collection expression analysis (consolidates 3 duplicate methods)
-class CollectionExpressionAnalyzer {
-    public static boolean isEmptyCollection(Expression expr) {
-        if (!(expr instanceof ObjectCreationExpr creation)) {
-            return false;
-        }
-        
-        return TypeInspector.isCollectionType(creation.getType())
-            && creation.getArguments().isEmpty();
-    }
-    
-    public static boolean hasEmptyCollectionArguments(Map<String, Expression> args) {
-        return args.values().stream()
-            .anyMatch(CollectionExpressionAnalyzer::isEmptyCollection);
-    }
-}
-```
-
----
-
-### Priority 6: Value Objects (Type Safety)
-
-**Goal:** Replace primitive obsession with type-safe value objects.
-
-```java
-// Test arguments value object
-record TestArguments(Map<String, Expression> args) {
-    public boolean containsNullLiteral() {
-        return args.values().stream()
-            .anyMatch(expr -> expr instanceof NullLiteralExpr);
-    }
-    
-    public boolean hasEmptyCollections() {
-        return args.values().stream()
-            .anyMatch(CollectionExpressionAnalyzer::isEmptyCollection);
-    }
-    
-    public Optional<Expression> get(String paramName) {
-        return Optional.ofNullable(args.get(paramName));
-    }
-    
-    public int size() {
-        return args.size();
-    }
-}
-
-// Test method context
-record TestMethodContext(
-    MethodDeclaration sourceMethod,
-    MethodResponse response,
-    TestArguments arguments,
-    String invocationExpression
-) {
-    public boolean hasException() {
-        return response.isException();
-    }
-    
-    public boolean isVoidMethod() {
-        return response.isVoid();
-    }
-}
-
-// Assertion decision
-enum AssertionDecision {
-    ASSERT_THROWS {
-        @Override
-        public void apply(MethodResponse response, String invocation, BlockStmt testBody) {
-            testBody.addStatement("assertThrows(" + response.getExceptionType() + ".class, () -> " + invocation + ")");
-        }
-    },
-    
-    NO_ASSERTION {
-        @Override
-        public void apply(MethodResponse response, String invocation, BlockStmt testBody) {
-            testBody.addStatement(invocation + "; // No assertion - expected exception suppressed");
-        }
-    },
-    
-    ASSERT_SUCCESS {
-        @Override
-        public void apply(MethodResponse response, String invocation, BlockStmt testBody) {
-            testBody.addStatement("assertDoesNotThrow(() -> " + invocation + ")");
-        }
-    };
-    
-    public abstract void apply(MethodResponse response, String invocation, BlockStmt testBody);
-}
-```
-
----
-
-### Priority 7: Constants Extraction
-
-```java
-class TestGenerationConstants {
-    // Paths
-    public static final String SRC_MAIN_JAVA = "src/main/java";
-    public static final String SRC_TEST_JAVA = "src/test/java";
-    
-    // Annotations
-    public static final String INJECT_MOCKS = "InjectMocks";
-    public static final String MOCK = "Mock";
-    public static final String BEFORE_EACH = "BeforeEach";
-    public static final String TEST = "Test";
-    
-    // Class names
-    public static final String REFLECTION_TEST_UTILS = "org.springframework.test.util.ReflectionTestUtils";
-    public static final String ASSERTIONS = "org.junit.jupiter.api.Assertions";
-    
-    // Default values
-    public static final String STRING_PLACEHOLDER = "Antikythera";
-    public static final String NUMERIC_PLACEHOLDER = "0";
-    public static final String BOOLEAN_PLACEHOLDER = "false";
-}
-```
-
----
-
-### Priority 8: Dependency Injection
-
-```java
-class UnitTestGenerator implements ITestGenerator {
-    // Injected dependencies (no more static calls)
-    private final AntikytheraRunTime runtime;
-    private final Settings settings;
-    private final MockingRegistry mockRegistry;
-    private final ImportManager importManager;
-    
-    // Collaborators
-    private final TestGenerationPipeline pipeline;
-    private final TestComponentFactory componentFactory;
-    
-    // Constructor injection
-    public UnitTestGenerator(
-        CompilationUnit cu,
-        AntikytheraRunTime runtime,
-        Settings settings,
-        MockingRegistry mockRegistry,
-        ImportManager importManager
-    ) {
-        this.runtime = runtime;
-        this.settings = settings;
-        this.mockRegistry = mockRegistry;
-        this.importManager = importManager;
-        
-        // Build collaborators
-        this.componentFactory = createComponentFactory();
-        this.pipeline = createPipeline(cu);
-    }
-    
-    private TestComponentFactory createComponentFactory() {
-        return settings.isTestNgMode()
-            ? new TestNGComponentFactory(settings)
-            : new JUnit5ComponentFactory(settings);
-    }
-    
-    private TestGenerationPipeline createPipeline(CompilationUnit cu) {
-        return new UnitTestGenerationPipeline(
-            cu,
-            componentFactory,
-            new MockConfigurationService(runtime, settings, mockRegistry),
-            new AssertionOrchestrator(settings),
-            importManager
-        );
-    }
-}
-
-// Factory for creating generators
-class TestGeneratorFactory {
-    private final AntikytheraRunTime runtime;
-    private final Settings settings;
-    
-    public TestGeneratorFactory(AntikytheraRunTime runtime, Settings settings) {
-        this.runtime = runtime;
-        this.settings = settings;
-    }
-    
-    public ITestGenerator createUnitTestGenerator(CompilationUnit cu) {
-        return new UnitTestGenerator(
-            cu,
-            runtime,
-            settings,
-            new MockingRegistry(),
-            new ImportManager()
-        );
-    }
-    
-    public ITestGenerator createSpringTestGenerator(CompilationUnit cu) {
-        return new SpringTestGenerator(
-            cu,
-            runtime,
-            settings,
-            new MockingRegistry(),
-            new ImportManager()
-        );
-    }
-}
-```
 
 ---
 
@@ -962,7 +301,7 @@ class TestGeneratorFactory {
 6. `JunitAsserterTest` - Enhanced with Gson, IAE→NPE tests
 
 **Updated Test Classes:**
-- `UnitTestGeneratorTest` - +490 lines (26 new test methods)
+- `UnitTestGeneratorTest` — significantly expanded (reflection wiring, type coercion, setter/getter resolution, exception suppression, `@Value` injection, Feign/plain-mock config, etc.); line and method counts drift with ongoing changes.
   - Reflection wiring tests
   - Type coercion tests
   - Setter/getter resolution tests
@@ -1055,8 +394,39 @@ INFO: Fallback discovery under base_package 'com.example':
 1. **Binary-Only Types** - Limited classification for types without source AST
 2. **Nested Classes** - Discovery per type, but generation still CU-aware (potential disconnect)
 3. **Complex Inheritance** - Setter resolution may fail for deep hierarchies with non-standard naming
-4. **Feign Fallbacks** - Only `ProblemFeignClient` gets special treatment (hardcoded name)
+4. **Feign / client mocks** - Types whose simple name ends in `Client` default to `RETURNS_DEEP_STUBS`. Exceptions are **configuration-driven** via `plain_mock_dependency_simple_names` in `generator.yml` (not hard-coded project types).
 5. **Enum Logic** - Enums always skipped (future: `include_enum_logic: true` opt-in)
+
+---
+
+## Plan: Remove hardcoded `ProblemFeignClient` (config-driven plain mocks)
+
+**Goal:** Delete the special case `!simple.equals("ProblemFeignClient")` from `UnitTestGenerator.applyMockAnnotationForDependencyType` so the generator stays project-agnostic, while **all tests keep passing** and existing POMR-style behavior is preserved through YAML.
+
+### Design
+
+| Concern | Approach |
+|--------|----------|
+| **No hardcoded type names** | Use `Settings.PLAIN_MOCK_DEPENDENCY_SIMPLE_NAMES` → YAML key `plain_mock_dependency_simple_names` (list of **simple** names only). |
+| **Default for `*Client`** | Unlisted clients continue to receive `@Mock(answer = RETURNS_DEEP_STUBS)`. |
+| **Regression tests** | `src/test/resources/generator.yml` lists `ProblemFeignClient` so `testProblemFeignClientUsesPlainMocksWhenListedInConfig` (renamed from `testProblemFeignClientUsesPlainMocks`) still expects a plain `@Mock`. |
+| **Config-off behavior** | `generator-no-plain-mock-clients.yml` omits the key; `testClientTypesUseDeepStubsWhenPlainMockListUnset` asserts `ProblemFeignClient` gets deep stubs—proves the mechanism, not the old hardcode. |
+| **Real projects** | Ship `plain_mock_dependency_simple_names` in project `generator.yml` (see `src/main/resources/generator.yml` example for POMR). |
+
+### Implementation status
+
+The plain-mock configuration work is **done in this repo**. Track it as **section A** in [Implementation checklist](#implementation-checklist) below.
+
+### Migration note for consumers
+
+If you previously relied on the built-in `ProblemFeignClient` exception and your `generator.yml` does **not** yet list it, add:
+
+```yaml
+plain_mock_dependency_simple_names:
+  - ProblemFeignClient
+```
+
+After migration, generated tests for that Feign client match the old failure-path behavior.
 
 ---
 
@@ -1072,7 +442,7 @@ The `kitchen-sink` branch delivers **substantial improvements** to test generati
 - Comprehensive documentation and testing
 
 **⚠️ Technical Debt:**
-- `UnitTestGenerator` SRP violation (1,400 lines, 12+ responsibilities)
+- `UnitTestGenerator` SRP violation (~2,300 lines, many intertwined responsibilities)
 - Code duplication in type checking and setter resolution
 - High cyclomatic complexity in exception handling
 - Tight coupling to global state
@@ -1083,235 +453,154 @@ The `kitchen-sink` branch delivers **substantial improvements** to test generati
 - **Code Quality:** C+ (Works but needs refactoring)
 - **Testing:** A- (Comprehensive with minor gaps)
 - **Documentation:** A (Excellent)
-- **Overall:** B+ (Ship with refactoring backlog)
+- **Overall:** B+ (Strong delivery; refactoring backlog documented)
 
 ---
 
-## 🎯 Final Recommendation: Two-Phase Approach
+## Refactoring roadmap
 
-### Phase 1: Ship & Stabilize (Immediate)
+### Phase 1: Stabilization and verification
 
-**Decision:** **MERGE TO MAIN NOW** ✅
+Before larger structural refactors, confirm the current tree is healthy:
 
-**Rationale:**
-- Functionality is excellent (Grade A)
-- Test coverage is comprehensive (Grade A-)
-- Business value is significant (automatic discovery, better exception handling)
-- Technical debt is manageable and well-documented
-
-**Pre-Merge Actions:**
-1. Run full test suite: `mvn clean verify`
-2. Generate test coverage report
-3. Tag release as `v2.0.0-kitchen-sink`
-4. Update main README with new features
+1. Run the full test suite: `JAVA_HOME=... mvn clean verify` (see `AGENTS.md` for module order).
+2. Optionally generate a coverage report (JaCoCo) for a baseline.
+3. Keep user-facing docs (README, generator guides) aligned with behavior changes.
 
 ---
 
-### Phase 2: Pattern-Driven Refactoring (Next 2-3 Sprints)
+### Phase 2: Incremental refactor (following sprints)
 
-**Goal:** Transform `UnitTestGenerator` from **Service-Oriented** to **Pattern-Driven Architecture**
+**Goal:** Shrink and clarify `UnitTestGenerator` using **helpers and collaborators**, not a pattern catalog. Revisit the **Refactoring Recommendations** section above for what is in vs out of scope.
 
-#### Sprint 1: Foundation (Week 1-2)
-**Focus:** Utilities & Value Objects
+#### Sprint 1: Utilities and constants (Week 1–2)
 
-1. **Create utility classes** (Low risk, high impact)
-   - `JavaBeansConventions` - Consolidate getter/setter logic
-   - `TypeInspector` - Eliminate collection type duplication
-   - `CollectionExpressionAnalyzer` - Unify empty collection detection
-   - `TestGenerationConstants` - Extract all magic strings
+0. **Configuration hygiene (done)** — `plain_mock_dependency_simple_names` (see **Plan: Remove hardcoded ProblemFeignClient**).
 
-2. **Introduce value objects**
-   - `TestArguments` record
-   - `TestMethodContext` record
-   - `AssertionDecision` enum
+1. **Extract utility types:** `JavaBeansConventions`, `TypeInspector`, `CollectionExpressionAnalyzer`, `TestGenerationConstants` (same as **Refactoring Recommendations**).
 
-3. **Validation:** Run existing tests - should be 100% green (refactoring only)
+2. **Optional small types:** e.g. a `record` wrapping argument map for `handleExceptionResponse` if it improves readability—**not** a framework of strategy interfaces.
 
-**Estimated Effort:** 3-5 days  
-**Risk Level:** Low  
-**LOC Reduction:** ~200 lines from `UnitTestGenerator`
+3. **Validation:** Full test suite green; refactor-only diffs.
+
+**Estimated effort:** ~3–5 days · **Risk:** low
 
 ---
 
-#### Sprint 2: Core Patterns (Week 3-4)
-**Focus:** Strategy & Chain of Responsibility
+#### Sprint 2: Exception path and long methods (Week 3–4)
 
-1. **Implement Strategy Pattern**
-   - Mock injection strategies (Constructor, Setter, Reflection)
-   - Assertion strategies (Exception, Void, Field, Scalar)
-   - Strategy selectors
+1. **Extract `ExceptionResponseAsserter`** (or equivalent): move logic out of `handleExceptionResponse` into one class with private helpers / small outcome enum.
 
-2. **Implement Chain of Responsibility**
-   - Exception analysis chain
-   - Handler hierarchy
-   - Decision engine
+2. **Extract method** on other long methods (`injectMockedFieldsViaReflection`, `mockFieldWithSetter`, etc.) without introducing new abstraction layers.
 
-3. **Refactor `handleExceptionResponse()`**
-   - Replace 95-line method with pattern-based approach
-   - Extract to `ExceptionDecisionEngine`
+3. **Validation:** Same tests; optional diff of generated tests on a sample project.
 
-4. **Validation:** 
-   - All existing tests pass
-   - Generate tests for sample project - compare outputs
-   - Add new pattern-specific unit tests
-
-**Estimated Effort:** 5-8 days  
-**Risk Level:** Medium  
-**LOC Reduction:** ~400 lines from `UnitTestGenerator`
+**Estimated effort:** ~5–8 days · **Risk:** medium
 
 ---
 
-#### Sprint 3: Architectural Patterns (Week 5-6)
-**Focus:** Facade, Template Method, Builder
+#### Sprint 3: Mock wiring and optional DI (Week 5–6, as needed)
 
-1. **Apply Facade Pattern**
-   - Transform `UnitTestGenerator` into thin coordinator
-   - Extract subsystems: `MockConfigurationService`, `AssertionOrchestrator`
+1. **Package-private collaborators** for mock field discovery and injection if `UnitTestGenerator` is still hard to navigate.
 
-2. **Implement Template Method**
-   - `TestGenerationPipeline` abstract class
-   - `UnitTestGenerationPipeline` concrete implementation
-   - Define invariant workflow with hooks
+2. **Constructor injection** for selected dependencies **only if** it unlocks real unit tests; skip factory/pipeline hierarchies unless a second shared workflow appears.
 
-3. **Implement Builder Pattern**
-   - `TestMethodBuilder` for fluent construction
-   - `GivenBuilder`, `ThenBuilder` sub-builders
+3. **Validation:** Regression suite; compare generation time if you change hot paths.
 
-4. **Apply Dependency Injection**
-   - Constructor injection for all dependencies
-   - `TestGeneratorFactory` for creation
+**Estimated effort:** flexible · **Risk:** medium
 
-5. **Validation:**
-   - Full regression test suite
-   - Performance benchmarking (should be comparable)
-   - Generate tests for 3-5 real projects
-
-**Estimated Effort:** 8-10 days  
-**Risk Level:** Medium-High  
-**LOC Reduction:** ~600 lines from `UnitTestGenerator`  
-**Final Target:** `UnitTestGenerator` ~300-400 lines (down from 1,400)
+**Stretch target (not a commitment):** materially shorter `UnitTestGenerator` (~2,300 lines today); exact line target matters less than **lower duplication** and **clear exception/mocking flow**.
 
 ---
 
-### Success Metrics
+### Success metrics
 
 | Metric | Before | Target | Measurement |
 |--------|--------|--------|-------------|
-| **UnitTestGenerator LOC** | 1,400 | 300-400 | Line count |
-| **Cyclomatic Complexity** | 15-20 | <10 | SonarQube |
-| **Duplicated Code** | ~5% | <3% | SonarQube |
-| **Test Coverage** | 85% | >90% | JaCoCo |
-| **Code Maintainability** | C+ | A- | SonarQube Grade |
-| **Pattern Usage** | 0 | 6 GoF patterns | Code review |
+| **UnitTestGenerator LOC** | ~2,300 | (reduce meaningfully) | `wc -l` |
+| **Duplication / complexity** | (measure) | Improve | SonarQube or IDE |
+| **Test coverage** | (measure) | Maintain or improve | JaCoCo |
+| **Clarity** | Large class | Easier navigation | Code review |
+
+Do **not** use “number of design patterns” as a success metric.
 
 ---
 
-### Risk Mitigation
+### Risk mitigation
 
-**Risk 1: Regression bugs during refactoring**
-- **Mitigation:** 
-  - Keep existing tests as "golden tests"
-  - Run full suite after each pattern implementation
-  - Use feature flags for new pattern-based code paths
-  - Compare generated test outputs before/after
+**Regression bugs**
+- Keep existing tests as regression anchors; run the full suite after each extraction.
+- Optionally diff generated output on a fixture project before/after large moves.
 
-**Risk 2: Performance degradation**
-- **Mitigation:**
-  - Benchmark before refactoring (baseline)
-  - Monitor generation time per test
-  - Profile with JProfiler if needed
-  - Target: <5% performance delta
+**Performance**
+- Baseline generation time if you touch hot loops; expect negligible change from pure moves.
 
-**Risk 3: Merge conflicts (if main branch evolves)**
-- **Mitigation:**
-  - Complete refactoring in 2-3 weeks maximum
-  - Daily rebase from main
-  - Feature freeze on `UnitTestGenerator` during refactoring
+**Over-engineering**
+- If a change does not remove duplication or shrink a hard method, **do not** add interfaces, chains, or builders “for consistency.”
 
-**Risk 4: Over-engineering**
-- **Mitigation:**
-  - Apply patterns only where complexity exists
-  - Don't force patterns into simple code
-  - Each pattern must eliminate ≥2 code smells
-  - Code review after each sprint
+**Long-running branch divergence**
+- Small increments; integrate often.
 
 ---
 
-### Recommended Action Plan
+### Why this approach works
 
-#### Immediate (This Week)
-- [x] ✅ **MERGE kitchen-sink to main**
-- [ ] Create JIRA epic: "Test Generator Pattern Refactoring"
-- [ ] Create 3 child stories (one per sprint)
-- [ ] Tag current code as `v2.0.0-kitchen-sink`
-
-#### Sprint 1 (Week 1-2)
-- [ ] Extract utility classes
-- [ ] Introduce value objects
-- [ ] Extract constants
-- [ ] Update tests
-
-#### Sprint 2 (Week 3-4)
-- [ ] Implement Strategy Pattern (mock injection + assertions)
-- [ ] Implement Chain of Responsibility (exception analysis)
-- [ ] Refactor `handleExceptionResponse()`
-- [ ] Add pattern-specific tests
-
-#### Sprint 3 (Week 5-6)
-- [ ] Apply Facade Pattern
-- [ ] Implement Template Method
-- [ ] Implement Builder Pattern
-- [ ] Apply Dependency Injection
-- [ ] Full regression testing
-- [ ] Documentation update
-- [ ] Merge refactoring branch to main
+1. **Highest leverage first** — utilities remove repeated bugs and noise with minimal structure.
+2. **Exception logic isolated** — one place to read and test, without a plugin architecture.
+3. **Room to stop** — Sprints 2–3 can be shortened or skipped if the class is already maintainable.
 
 ---
 
-### Why This Approach Works
+## Implementation checklist
 
-1. **Incremental Value**
-   - Ship features immediately (business value)
-   - Improve architecture gradually (technical value)
-   - Each sprint delivers measurable improvement
+**Sections B–E** are the active backlog: mark `[ ]` → `[x]` as you complete work.
 
-2. **Risk Management**
-   - Low-risk utilities first (build confidence)
-   - Core patterns second (validated by tests)
-   - Architectural changes last (when foundation is solid)
+**Section A** is different: it lists work **already merged** in this repository (config-driven `plain_mock_dependency_simple_names` instead of a hardcoded `ProblemFeignClient` exception). Those lines stay `[x]` so readers do not treat them as open tasks. If you are using this doc in another fork where that work is not present, treat A as your own todo list and uncheck until done.
 
-3. **Learning Opportunity**
-   - Team learns GoF patterns incrementally
-   - Each pattern has clear motivation (not academic)
-   - Patterns solve real pain points (exception handling, mock injection)
+### A. Configuration: plain `@Mock` for selected `*Client` types *(completed in this repo)*
 
-4. **Maintainability**
-   - Well-known patterns = instant comprehension
-   - New developers recognize Facade, Strategy, Chain of Responsibility
-   - Easier to extend (add new mock strategies, assertion types)
+- [x] Add `Settings.PLAIN_MOCK_DEPENDENCY_SIMPLE_NAMES` (`plain_mock_dependency_simple_names` in YAML).
+- [x] Replace hardcoded `ProblemFeignClient` check in `UnitTestGenerator.applyMockAnnotationForDependencyType` with `Settings.getPropertyList(...)`.
+- [x] Add `plain_mock_dependency_simple_names` entries to `src/test/resources/generator.yml` and sample `src/main/resources/generator.yml`.
+- [x] Add `generator-no-plain-mock-clients.yml` and tests (`try` / `finally` reload `Settings`) proving config-on vs config-off behavior.
+- [x] Document migration for consumers (this file + generator guides as needed).
 
-5. **Future-Proof**
-   - Template Method enables new test types (integration tests, contract tests)
-   - Strategy Pattern enables new frameworks (Spock, Kotest)
-   - Builder Pattern enables complex test scenarios
+### B. Sprint 1 — Utilities and constants
+
+- [ ] Introduce `JavaBeansConventions` (or equivalent); switch `setterNameForField` / `getterMethodNameForField` / related call sites.
+- [ ] Introduce `TypeInspector` (or extend one helper); replace repeated `List` / `Set` / `Map` raw-name checks in `UnitTestGenerator` (and elsewhere as needed).
+- [ ] Introduce `CollectionExpressionAnalyzer` (or single shared helper); align `UnitTestGenerator` and `ExceptionAnalyzer` empty-collection detection where safe.
+- [ ] Introduce `TestGenerationConstants`; replace repeated literals (paths, `"Mock"`, placeholders, etc.) without behavior change.
+- [ ] Optional: add a small `record` for test-argument maps if it clarifies exception handling call sites.
+- [ ] Run `antikythera-test-generator` tests + install `antikythera` first per `AGENTS.md`.
+
+### C. Sprint 2 — Exception path and long methods
+
+- [ ] Extract `ExceptionResponseAsserter` (name TBD): move body of `handleExceptionResponse` behind a thin method on `UnitTestGenerator`.
+- [ ] Document side effects (e.g. collection re-seeding) in the new class; keep them explicit in the API or call order.
+- [ ] Add or extend unit tests targeting the asserter’s decisions (null/IAE/NPE/suppression paths).
+- [ ] Extract method(s) from `injectMockedFieldsViaReflection`, `mockFieldWithSetter`, `normalizeInlineObjectCreationNulls`, `createFieldInitializer` as separate steps; run tests after each extraction.
+- [ ] Optional: diff generated tests for a sample project before/after the exception refactor.
+
+### D. Sprint 3 — Mock wiring and optional DI (as needed)
+
+- [ ] If `UnitTestGenerator` is still overloaded: extract package-private `MockFieldSupport` (or similar) for mock field discovery + wiring.
+- [ ] If testability requires it: pass `AntikytheraRunTime` / `Settings` (or facades) via constructor for **new** test-focused seams—avoid large factory/pipeline hierarchies.
+- [ ] Re-run full module tests and spot-check generation time on a representative project.
+
+### E. Gates (repeat after each merge-ready chunk)
+
+- [ ] `JAVA_HOME=... mvn test` (or `verify`) for `antikythera-test-generator` with `antikythera` installed as required by `AGENTS.md`.
+- [ ] No new dependencies introduced without `pom.xml` / license review.
+- [ ] User-visible behavior change documented in `README` or `docs/` when configuration or output changes.
 
 ---
 
-## Pattern Catalog Reference
+## Further reading
 
-For team onboarding, reference these canonical sources:
-
-- **Gang of Four (GoF):** *Design Patterns: Elements of Reusable Object-Oriented Software*
-- **Facade Pattern:** Simplify complex subsystem interactions
-- **Strategy Pattern:** Encapsulate interchangeable algorithms
-- **Template Method:** Define algorithm skeleton, defer details to subclasses
-- **Chain of Responsibility:** Pass requests along handler chain
-- **Builder Pattern:** Construct complex objects step-by-step
-- **Factory Method:** Create objects without specifying exact class
+*Design Patterns* (GoF) and similar references remain useful **vocabulary**, not a checklist. Prefer **Fowler-style refactorings** (extract method/class, move method) until a second real variant forces something richer.
 
 ---
 
-**Document Version:** 2.0  
-**Author:** AI Code Analyzer  
-**Review Status:** Ready for Implementation  
+**Document Version:** 2.4  
 **Last Updated:** April 4, 2026

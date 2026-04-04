@@ -233,7 +233,7 @@ new PatientDto("0", 0L);  // Sensible defaults
 |----------------|-----------|-----|
 | `UserDao`, `OrderRepository` | Deep Stubs | Supports chained calls like `dao.find().get()` |
 | `HttpClient`, `ApiClient` | Deep Stubs | HTTP client method chaining |
-| `ProblemFeignClient` | Plain Mock | Preserves error handling behavior |
+| `ProblemFeignClient` (and others) | Plain Mock when listed in `plain_mock_dependency_simple_names` | Preserves error handling behavior without hard-coding type names |
 | Everything else | Plain Mock | Standard behavior |
 
 ---
