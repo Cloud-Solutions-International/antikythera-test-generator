@@ -121,8 +121,9 @@ public abstract class TestGenerator implements ITestGenerator {
 
         md.findAncestor(TypeDeclaration.class).ifPresent(c ->
         {
-            String comment = String.format("Method under test: %s.%s()%nArgument generator : %s%nAuthor : Antikythera%n",
-                    c.getNameAsString(), md.getNameAsString(), argumentGenerator.getClass().getSimpleName());
+            String comment = String.format("Method under test: %s.%s()%nArgument generator : %s%n%s%n",
+                    c.getNameAsString(), md.getNameAsString(), argumentGenerator.getClass().getSimpleName(),
+                    TestGenerationConstants.GENERATED_COMMENT_AUTHOR_SPACED);
             tm.setJavadocComment(comment);
         });
 

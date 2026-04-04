@@ -94,9 +94,9 @@ import java.util.Set;
 public class UnitTestGenerator extends TestGenerator {
     private static final Logger logger = LoggerFactory.getLogger(UnitTestGenerator.class);
     public static final String TEST_NAME_SUFFIX = "AKTest";
-    public static final String MOCK_BEAN = "MockBean";
-    public static final String MOCK = "Mock";
-    public static final String AUTHOR_ANTIKYTHERA = "Author : Antikythera";
+    public static final String MOCK_BEAN = TestGenerationConstants.MOCK_BEAN_SIMPLE_NAME;
+    public static final String MOCK = TestGenerationConstants.MOCK_SIMPLE_NAME;
+    public static final String AUTHOR_ANTIKYTHERA = TestGenerationConstants.GENERATED_COMMENT_AUTHOR_SPACED;
     private final String filePath;
 
     private boolean autoWired;
@@ -132,7 +132,7 @@ public class UnitTestGenerator extends TestGenerator {
 
         // Navigate from .../src/main/java → .../src/test/java using the Path API
         // instead of fragile string replacement.
-        Path testRoot = Paths.get(basePath).getParent().getParent().resolve("test").resolve("java");
+        Path testRoot = Paths.get(basePath).getParent().getParent().resolve(TestGenerationConstants.MAVEN_TEST_JAVA_UNDER_SRC);
         filePath = testRoot.resolve(packageDecl.replace(".", File.separator))
                 .resolve(className + ".java")
                 .toString();
@@ -220,7 +220,7 @@ public class UnitTestGenerator extends TestGenerator {
         for (TypeDeclaration<?> t : gen.getTypes()) {
             for (MethodDeclaration md : t.getMethods()) {
                 md.getComment().ifPresent(c -> {
-                    if (!c.getContent().contains("Author: Antikythera")) {
+                    if (!c.getContent().contains(TestGenerationConstants.GENERATED_COMMENT_AUTHOR_COMPACT)) {
                         remove.add(md);
                     }
                 });
@@ -293,7 +293,7 @@ public class UnitTestGenerator extends TestGenerator {
     void loadPredefinedBaseClassForTest(String baseClassName) {
         String basePath = Settings.getProperty(Settings.BASE_PATH, String.class).orElseThrow();
         // Navigate from .../src/main/java → .../src/test/java using the Path API.
-        Path testRoot = Paths.get(basePath).getParent().getParent().resolve("test").resolve("java");
+        Path testRoot = Paths.get(basePath).getParent().getParent().resolve(TestGenerationConstants.MAVEN_TEST_JAVA_UNDER_SRC);
         String helperPath = testRoot.resolve(AbstractCompiler.classToPath(baseClassName)).toString();
         try {
             baseTestClass = StaticJavaParser.parse(new File(helperPath));
@@ -1326,8 +1326,8 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private String coerceGeneratedStringPlaceholder(String value) {
-        if (Reflect.ANTIKYTHERA.equals(value)) {
-            return "0";
+        if (TestGenerationConstants.EVALUATOR_STRING_PLACEHOLDER.equals(value)) {
+            return TestGenerationConstants.NUMERIC_PLACEHOLDER;
         }
         return value;
     }
@@ -1824,7 +1824,8 @@ public class UnitTestGenerator extends TestGenerator {
         for (TypeDeclaration<?> testType : gen.getTypes()) {
             for (FieldDeclaration field : testType.getFields()) {
                 boolean hasMockAnnotation = field.getAnnotations().stream()
-                        .anyMatch(ann -> ann.getNameAsString().equals("Mock") || ann.getNameAsString().equals("MockBean"));
+                        .anyMatch(ann -> ann.getNameAsString().equals(TestGenerationConstants.MOCK_SIMPLE_NAME)
+                                || ann.getNameAsString().equals(TestGenerationConstants.MOCK_BEAN_SIMPLE_NAME));
 
                 if (hasMockAnnotation) {
                     mockedFieldNames.add(field.getVariable(0).getNameAsString());
@@ -1840,7 +1841,7 @@ public class UnitTestGenerator extends TestGenerator {
         // Generate setField calls for each mocked field
         for (String fieldName : mockedFieldNames) {
             MethodCallExpr setFieldCall = new MethodCallExpr(
-                new NameExpr("ReflectionTestUtils"),
+                new NameExpr(TestGenerationConstants.REFLECTION_TEST_UTILS_SIMPLE_NAME),
                 "setField",
                 new NodeList<>(
                     new NameExpr(serviceInstanceName),
@@ -1874,7 +1875,7 @@ public class UnitTestGenerator extends TestGenerator {
             for (VariableDeclarator var : fd.getVariables()) {
                 valueFieldInitializerLiteral(fd.getElementType()).ifPresent(init ->
                         beforeBody.addStatement(String.format(
-                                "ReflectionTestUtils.setField(%s, \"%s\", %s);",
+                                TestGenerationConstants.REFLECTION_TEST_UTILS_SIMPLE_NAME + ".setField(%s, \"%s\", %s);",
                                 serviceInstanceName, var.getNameAsString(), init)));
             }
         }
@@ -2000,7 +2001,7 @@ public class UnitTestGenerator extends TestGenerator {
         addImport(new ImportDeclaration("org.junit.jupiter.api.BeforeEach", false, false));
         addImport(new ImportDeclaration("org.mockito.Mock", false, false));
         addImport(new ImportDeclaration("org.mockito.Mockito", false, false));
-        addImport(new ImportDeclaration("org.springframework.test.util.ReflectionTestUtils", false, false));
+        addImport(new ImportDeclaration(TestGenerationConstants.REFLECTION_TEST_UTILS_FQN, false, false));
 
         for (Map.Entry<String, CompilationUnit> entry : Graph.getDependencies().entrySet()) {
             CompilationUnit cu = entry.getValue();
@@ -2072,7 +2073,7 @@ public class UnitTestGenerator extends TestGenerator {
             String simple = elementType.asClassOrInterfaceType().getNameAsString();
             if (simple.endsWith("Dao") || simple.endsWith("Repository")
                     || (simple.endsWith("Client") && !isPlainMockDependencySimpleName(simple))) {
-                field.addAnnotation(new NormalAnnotationExpr(new Name("Mock"), new NodeList<>(
+                field.addAnnotation(new NormalAnnotationExpr(new Name(TestGenerationConstants.MOCK_SIMPLE_NAME), new NodeList<>(
                         new MemberValuePair("answer", new FieldAccessExpr(new NameExpr("Answers"), "RETURNS_DEEP_STUBS"))
                 )));
                 addImport(new ImportDeclaration("org.mockito.Answers", false, false));
@@ -2203,7 +2204,7 @@ public class UnitTestGenerator extends TestGenerator {
             String name = mce.getNameAsString();
             if (name.equals("of") && mce.getScope().isPresent()) {
                 String scope = mce.getScope().get().toString();
-                if (scope.equals("List")) {
+                if (scope.equals(TestGenerationConstants.LIST_FACTORY_SCOPE)) {
                     if (mce.getArguments().isEmpty()) {
                         return StaticJavaParser.parseExpression("new java.util.ArrayList<>()");
                     } else {
@@ -2211,7 +2212,7 @@ public class UnitTestGenerator extends TestGenerator {
                                 String.format("new java.util.ArrayList<>(java.util.Arrays.asList(%s))", mce.getArgument(0)));
                     }
                 }
-                if (scope.equals("Set")) {
+                if (scope.equals(TestGenerationConstants.SET_FACTORY_SCOPE)) {
                     if (mce.getArguments().isEmpty()) {
                         return StaticJavaParser.parseExpression("new java.util.HashSet<>()");
                     } else {
