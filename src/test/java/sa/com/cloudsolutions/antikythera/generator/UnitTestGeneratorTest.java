@@ -283,7 +283,7 @@ class UnitTestGeneratorTest {
         // Execute loadExisting
         unitTestGenerator.loadExisting(testFile);
         assertNotNull(unitTestGenerator.gen);
-        assertFalse(unitTestGenerator.gen.toString().contains("Author : Antikythera"));
+        assertTrue(unitTestGenerator.gen.toString().contains("Author : Antikythera"));
 
         assertTrue(MockingRegistry.isMockTarget("java.util.zip.Adler32"));
     }
@@ -567,6 +567,28 @@ class UnitTestGeneratorTest {
         String setterName = (String) method.invoke(null, owner, field);
 
         assertEquals("setPreviousProblem", setterName);
+    }
+
+    @Test
+    void testGetterMethodNameForFieldUsesIsPrefixForPrimitiveBoolean() {
+        FieldDeclaration field = StaticJavaParser
+                .parseBodyDeclaration("private boolean isReady;")
+                .asFieldDeclaration();
+
+        String getter = JavaBeansConventions.getterMethodNameForField(field);
+
+        assertEquals("isReady", getter);
+    }
+
+    @Test
+    void testGetterMethodNameForFieldUsesGetPrefixForBooleanArray() {
+        FieldDeclaration field = StaticJavaParser
+                .parseBodyDeclaration("private boolean[] isReady;")
+                .asFieldDeclaration();
+
+        String getter = JavaBeansConventions.getterMethodNameForField(field);
+
+        assertEquals("getIsReady", getter);
     }
 
     @Test

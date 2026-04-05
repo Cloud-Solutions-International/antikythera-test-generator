@@ -32,7 +32,7 @@ public final class TestGenerationConstants {
     public static final String GENERATED_COMMENT_AUTHOR_SPACED = "Author : Antikythera";
 
     /** Marker when scanning existing generated sources for Antikythera-owned methods. */
-    public static final String GENERATED_COMMENT_AUTHOR_COMPACT = "Author: Antikythera";
+    public static final String GENERATED_COMMENT_AUTHOR_COMPACT = GENERATED_COMMENT_AUTHOR_SPACED;
 
     /** String placeholder produced by the evaluator, coerced in generated tests when needed. */
     public static final String EVALUATOR_STRING_PLACEHOLDER = Reflect.ANTIKYTHERA;

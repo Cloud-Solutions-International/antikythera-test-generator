@@ -25,9 +25,9 @@ class FallbackClassificationTest {
     }
 
     @AfterEach
-    void clearOverrides() {
-        Settings.setProperty("skip", List.of());
-        Settings.setProperty(Settings.INCLUDE, List.of());
+    void clearOverrides() throws IOException {
+        // Restore the full baseline test config to avoid leaking static Settings state.
+        Settings.loadConfigMap(new File("src/test/resources/generator.yml"));
     }
 
     private static TypeWrapper wrap(ClassOrInterfaceDeclaration t) {

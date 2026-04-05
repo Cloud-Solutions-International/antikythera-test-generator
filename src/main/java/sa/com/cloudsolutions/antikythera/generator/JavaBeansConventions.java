@@ -43,7 +43,9 @@ public final class JavaBeansConventions {
      */
     public static String getterMethodNameForField(FieldDeclaration field) {
         String fieldName = field.getVariable(0).getNameAsString();
-        Type t = field.getElementType();
+        // Use the declared variable type (not element type) so arrays like boolean[]
+        // are treated as non-primitive and keep JavaBeans getX naming.
+        Type t = field.getVariable(0).getType();
         if (t.isPrimitiveType() && t.asPrimitiveType().getType() == PrimitiveType.Primitive.BOOLEAN) {
             if (fieldName.startsWith("is") && fieldName.length() > 2 && Character.isUpperCase(fieldName.charAt(2))) {
                 return fieldName;
