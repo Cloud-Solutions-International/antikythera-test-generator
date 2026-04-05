@@ -193,12 +193,11 @@ public class ExceptionAnalyzer {
             String paramName = entry.getKey();
             String paramLower = paramName.toLowerCase();
             // Check if parameter name suggests it's a collection
-            if (paramLower.contains("list") 
+            if (paramLower.contains("list")
                 || paramLower.contains("collection")
-                || paramLower.contains("item")  // Changed from "items" to match both "item" and "items"
+                || paramLower.contains("item")
                 || paramLower.contains("set")
-                || paramLower.contains("array")
-                || paramLower.endsWith("s")) {  // Plural names often indicate collections
+                || paramLower.contains("array")) {
                 return paramName;
             }
         }

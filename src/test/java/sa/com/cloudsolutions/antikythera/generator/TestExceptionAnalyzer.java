@@ -1,8 +1,6 @@
 package sa.com.cloudsolutions.antikythera.generator;
 
 import com.github.javaparser.ast.expr.Expression;
-import com.github.javaparser.ast.expr.ObjectCreationExpr;
-import com.github.javaparser.ast.stmt.ForEachStmt;
 import com.github.javaparser.ast.stmt.IfStmt;
 import com.github.javaparser.StaticJavaParser;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +11,7 @@ import sa.com.cloudsolutions.antikythera.evaluator.Variable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -173,5 +172,43 @@ public class TestExceptionAnalyzer {
         boolean willTrigger = analyzer.willArgumentsTriggerException(ctx, args);
         assertFalse(willTrigger,
             "Collections.emptyList() should be detected as empty collection");
+    }
+
+    @Test
+    void testDoesNotTreatStatusAsCollectionParameter() {
+        Map<String, Expression> args = new LinkedHashMap<>();
+        args.put("status", StaticJavaParser.parseExpression("\"ACTIVE\""));
+        args.put("items", StaticJavaParser.parseExpression("List.of()"));
+
+        ExceptionContext ctx = new ExceptionContext();
+        ctx.setException(new RuntimeException());
+        ctx.setInsideLoop(true);
+
+        LoopContext loopCtx = new LoopContext();
+        loopCtx.setCollectionVariable(new Variable(new ArrayList<>()));
+        ctx.setLoopContext(loopCtx);
+
+        boolean willTrigger = analyzer.willArgumentsTriggerException(ctx, args);
+        assertFalse(willTrigger,
+            "'status' must not be misclassified as a collection when a real collection arg exists");
+    }
+
+    @Test
+    void testDoesNotTreatAddressAsCollectionParameter() {
+        Map<String, Expression> args = new LinkedHashMap<>();
+        args.put("address", StaticJavaParser.parseExpression("\"Main Street\""));
+        args.put("items", StaticJavaParser.parseExpression("List.of()"));
+
+        ExceptionContext ctx = new ExceptionContext();
+        ctx.setException(new RuntimeException());
+        ctx.setInsideLoop(true);
+
+        LoopContext loopCtx = new LoopContext();
+        loopCtx.setCollectionVariable(new Variable(new ArrayList<>()));
+        ctx.setLoopContext(loopCtx);
+
+        boolean willTrigger = analyzer.willArgumentsTriggerException(ctx, args);
+        assertFalse(willTrigger,
+            "'address' must not be misclassified as a collection when a real collection arg exists");
     }
 }

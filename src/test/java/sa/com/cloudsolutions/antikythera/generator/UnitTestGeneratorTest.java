@@ -53,11 +53,13 @@ import java.lang.reflect.Method;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -207,6 +209,32 @@ class UnitTestGeneratorTest {
     }
 
     @Test
+    void testIdentifyFieldsToBeMockedMapsBareConstructorAssignmentToFieldName() {
+        CompilationUnit probe = StaticJavaParser.parse("""
+                import org.springframework.stereotype.Service;
+
+                @Service
+                public class ConstructorInjectionProbe {
+                    private String repositoryField;
+                    private String helperField;
+
+                    ConstructorInjectionProbe(String constructorRepoParam, String constructorHelperParam) {
+                        repositoryField = constructorRepoParam;
+                        this.helperField = constructorHelperParam;
+                    }
+                }
+                """);
+
+        UnitTestGenerator probeGenerator = new UnitTestGenerator(probe);
+        probeGenerator.identifyFieldsToBeMocked();
+
+        TypeDeclaration<?> testClass = probeGenerator.getCompilationUnit().getType(0);
+        assertTrue(testClass.getFieldByName("repositoryField").isPresent());
+        assertTrue(testClass.getFieldByName("helperField").isPresent());
+        assertTrue(testClass.getFieldByName("constructorRepoParam").isEmpty());
+    }
+
+    @Test
     void testCreateInstanceA() {
         MethodDeclaration methodUnderTest = classUnderTest.findFirst(MethodDeclaration.class,
                 md -> md.getNameAsString().equals("queries2")).orElseThrow();
@@ -255,23 +283,28 @@ class UnitTestGeneratorTest {
 
     @Test
     void testLogger() throws ReflectiveOperationException {
-        Settings.setProperty(Settings.LOG_APPENDER,"sa.com.cloudsolutions.antikythera.testhelper.generator.LogHandler");
-        MethodDeclaration md = classUnderTest.getMethodsByName("queries5").getFirst();
-        argumentGenerator = new DummyArgumentGenerator();
-        unitTestGenerator.setArgumentGenerator(argumentGenerator);
-        unitTestGenerator.setupAsserterImports();
-        unitTestGenerator.addBeforeClass();
+        Object previousAppender = Settings.getProperty(Settings.LOG_APPENDER);
+        try {
+            Settings.setProperty(Settings.LOG_APPENDER,"sa.com.cloudsolutions.antikythera.testhelper.generator.LogHandler");
+            MethodDeclaration md = classUnderTest.getMethodsByName("queries5").getFirst();
+            argumentGenerator = new DummyArgumentGenerator();
+            unitTestGenerator.setArgumentGenerator(argumentGenerator);
+            unitTestGenerator.setupAsserterImports();
+            unitTestGenerator.addBeforeClass();
 
-        SpringEvaluator evaluator = EvaluatorFactory.create("sa.com.cloudsolutions.service.PersonService", SpringEvaluator.class);
-        evaluator.setOnTest(true);
-        evaluator.addGenerator(unitTestGenerator);
-        evaluator.setArgumentGenerator(argumentGenerator);
-        evaluator.visit(md);
-        CompilationUnit gen  = unitTestGenerator.getCompilationUnit();
-        assertNotNull(gen);
-        MethodDeclaration testMethod = gen.findFirst(MethodDeclaration.class, m -> m.getNameAsString().equals("queries5Test")).orElseThrow();
-        assertTrue(testMethod.toString().contains("Query5 executed"),
-                "The logger should be present in the test method.");
+            SpringEvaluator evaluator = EvaluatorFactory.create("sa.com.cloudsolutions.service.PersonService", SpringEvaluator.class);
+            evaluator.setOnTest(true);
+            evaluator.addGenerator(unitTestGenerator);
+            evaluator.setArgumentGenerator(argumentGenerator);
+            evaluator.visit(md);
+            CompilationUnit gen  = unitTestGenerator.getCompilationUnit();
+            assertNotNull(gen);
+            MethodDeclaration testMethod = gen.findFirst(MethodDeclaration.class, m -> m.getNameAsString().equals("queries5Test")).orElseThrow();
+            assertTrue(testMethod.toString().contains("Query5 executed"),
+                    "The logger should be present in the test method.");
+        } finally {
+            Settings.setProperty(Settings.LOG_APPENDER, previousAppender);
+        }
     }
 
     @Test
@@ -421,18 +454,24 @@ class UnitTestGeneratorTest {
 
     @Test
     void testSkipWhenUsageAddsCastingImportsWithoutBaseTestClass() throws Exception {
-        TestGenerator.getImports().clear();
-        MethodCallExpr expr = StaticJavaParser
-                .parseExpression("Mockito.when(repo.find((List<Integer>) Mockito.any())).thenReturn(List.of())")
-                .asMethodCallExpr();
-        Method method = UnitTestGenerator.class.getDeclaredMethod("skipWhenUsage", MethodCallExpr.class);
-        method.setAccessible(true);
+        Set<com.github.javaparser.ast.ImportDeclaration> importSnapshot = new HashSet<>(TestGenerator.getImports());
+        try {
+            TestGenerator.getImports().clear();
+            MethodCallExpr expr = StaticJavaParser
+                    .parseExpression("Mockito.when(repo.find((List<Integer>) Mockito.any())).thenReturn(List.of())")
+                    .asMethodCallExpr();
+            Method method = UnitTestGenerator.class.getDeclaredMethod("skipWhenUsage", MethodCallExpr.class);
+            method.setAccessible(true);
 
-        boolean skipped = (boolean) method.invoke(unitTestGenerator, expr);
+            boolean skipped = (boolean) method.invoke(unitTestGenerator, expr);
 
-        assertFalse(skipped);
-        assertTrue(TestGenerator.getImports().stream()
-                .anyMatch(i -> i.getNameAsString().equals("java.util.List")));
+            assertFalse(skipped);
+            assertTrue(TestGenerator.getImports().stream()
+                    .anyMatch(i -> i.getNameAsString().equals("java.util.List")));
+        } finally {
+            TestGenerator.getImports().clear();
+            TestGenerator.getImports().addAll(importSnapshot);
+        }
     }
 
     @Test
@@ -799,15 +838,20 @@ class UnitTestGeneratorTest {
 
     @Test
     void testSetupLoggersUsesDebugLevel() throws Exception {
-        Settings.setProperty(Settings.LOG_APPENDER, "com.example.LogAppender");
-        MethodDeclaration createMethod = classUnderTest.getMethodsByName("queries2").getFirst();
-        unitTestGenerator.createTests(createMethod, new MethodResponse());
+        Object previousAppender = Settings.getProperty(Settings.LOG_APPENDER);
+        try {
+            Settings.setProperty(Settings.LOG_APPENDER, "com.example.LogAppender");
+            MethodDeclaration createMethod = classUnderTest.getMethodsByName("queries2").getFirst();
+            unitTestGenerator.createTests(createMethod, new MethodResponse());
 
-        Method setupLoggers = UnitTestGenerator.class.getDeclaredMethod("setupLoggers");
-        setupLoggers.setAccessible(true);
-        setupLoggers.invoke(unitTestGenerator);
+            Method setupLoggers = UnitTestGenerator.class.getDeclaredMethod("setupLoggers");
+            setupLoggers.setAccessible(true);
+            setupLoggers.invoke(unitTestGenerator);
 
-        assertTrue(unitTestGenerator.getCompilationUnit().toString().contains("appLogger.setLevel(Level.DEBUG);"));
+            assertTrue(unitTestGenerator.getCompilationUnit().toString().contains("appLogger.setLevel(Level.DEBUG);"));
+        } finally {
+            Settings.setProperty(Settings.LOG_APPENDER, previousAppender);
+        }
     }
 
     @Test

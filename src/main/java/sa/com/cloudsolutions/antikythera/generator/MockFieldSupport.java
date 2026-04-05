@@ -161,13 +161,31 @@ final class MockFieldSupport {
 
     private Map<String, String> mapParamToFields(ConstructorDeclaration constructor) {
         Map<String, String> paramToFieldMap = new HashMap<>();
+        List<String> declaredFields = constructor.findAncestor(ClassOrInterfaceDeclaration.class)
+                .map(type -> type.getFields().stream()
+                        .flatMap(field -> field.getVariables().stream())
+                        .map(variable -> variable.getNameAsString())
+                        .toList())
+                .orElse(List.of());
+
         constructor.getBody().findAll(AssignExpr.class).forEach(assignExpr -> {
+            if (!assignExpr.getValue().isNameExpr()) {
+                return;
+            }
+
+            String fieldName = null;
             if (assignExpr.getTarget().isFieldAccessExpr()) {
-                String fieldName = assignExpr.getTarget().asFieldAccessExpr().getName().asString();
-                if (assignExpr.getValue().isNameExpr()) {
-                    String paramName = assignExpr.getValue().asNameExpr().getNameAsString();
-                    paramToFieldMap.put(paramName, fieldName);
+                fieldName = assignExpr.getTarget().asFieldAccessExpr().getName().asString();
+            } else if (assignExpr.getTarget().isNameExpr()) {
+                String bareTarget = assignExpr.getTarget().asNameExpr().getNameAsString();
+                if (declaredFields.contains(bareTarget)) {
+                    fieldName = bareTarget;
                 }
+            }
+
+            if (fieldName != null) {
+                String paramName = assignExpr.getValue().asNameExpr().getNameAsString();
+                paramToFieldMap.put(paramName, fieldName);
             }
         });
         return paramToFieldMap;
