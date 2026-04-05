@@ -299,6 +299,23 @@ class TargetClassifierTest {
     }
 
     @Test
+    void runtimeExceptionWithComplexGetterLogic_isUnitTarget() {
+        CompilationUnit cu = StaticJavaParser.parse("""
+                public class RichException extends RuntimeException {
+                    private final int code;
+                    public RichException(int code) { this.code = code; }
+                    public boolean isCritical() {
+                        return code >= 500 && code < 600;
+                    }
+                }
+                """);
+        ClassOrInterfaceDeclaration t = cu.getType(0).asClassOrInterfaceDeclaration();
+        TypeWrapper tw = wrap(t);
+        ClassificationResult r = TargetClassifier.classify(tw);
+        assertTrue(r.isUnitTarget());
+    }
+
+    @Test
     void dtoNameWithRealLogic_isUnitTarget() {
         CompilationUnit cu = StaticJavaParser.parse("""
                 public class ProblemDto {
@@ -371,6 +388,35 @@ class TargetClassifierTest {
         TypeWrapper tw = wrap(t);
         ClassificationResult r = TargetClassifier.classify(tw);
         assertTrue(r.isUnitTarget());
+    }
+
+    @Test
+    void staticUtilityWithRealLogic_isUnitTarget() {
+        CompilationUnit cu = StaticJavaParser.parse("""
+                public class BusinessMath {
+                    public static int score(int base) {
+                        return base > 10 ? base * 2 : base + 1;
+                    }
+                }
+                """);
+        ClassOrInterfaceDeclaration t = cu.getType(0).asClassOrInterfaceDeclaration();
+        TypeWrapper tw = wrap(t);
+        ClassificationResult r = TargetClassifier.classify(tw);
+        assertTrue(r.isUnitTarget());
+    }
+
+    @Test
+    void constantsOnlyHolder_stillSkippedAsConstantClass() {
+        CompilationUnit cu = StaticJavaParser.parse("""
+                public class Constants {
+                    public static final String APP = "x";
+                    public static final int RETRIES = 3;
+                }
+                """);
+        ClassOrInterfaceDeclaration t = cu.getType(0).asClassOrInterfaceDeclaration();
+        TypeWrapper tw = wrap(t);
+        ClassificationResult r = TargetClassifier.classify(tw);
+        assertEquals(SkipReason.CONSTANT_CLASS, r.reason());
     }
 
     @Test

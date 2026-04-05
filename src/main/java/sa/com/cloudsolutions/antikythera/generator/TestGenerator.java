@@ -26,7 +26,7 @@ public abstract class TestGenerator implements ITestGenerator {
      * Because of overloaded methods and the need to write multiple tests for a single end point
      * we may end up with duplicate method names. To avoid that, query arguments are added as
      * suffixes to the method name.
-     * When the same method can have multiple tests, an alphabetic suffix is added to the method name.
+     * When the same method can have multiple tests, an incrementing suffix is added to the method name.
      */
     Set<String> testMethodNames = new HashSet<>();
 
@@ -95,9 +95,9 @@ public abstract class TestGenerator implements ITestGenerator {
 
         if (testMethodNames.contains(testName)) {
             String base = testName;
-            int counter = testMethodNames.size();
+            int counter = 1;
             do {
-                testName = base + "_" + (char) ('A' + counter % 26);
+                testName = base + "_" + counter;
                 counter++;
             } while (testMethodNames.contains(testName));
         }

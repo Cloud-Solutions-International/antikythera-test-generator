@@ -301,6 +301,9 @@ public final class TargetClassifier {
         if (hasNonStaticMethod) {
             return false;
         }
+        if (hasNonBoilerplateMethod(cdecl)) {
+            return false;
+        }
         return !cdecl.getFields().isEmpty() || !cdecl.getMethods().isEmpty() || !cdecl.getConstructors().isEmpty();
     }
 
@@ -332,7 +335,10 @@ public final class TargetClassifier {
 
     private static boolean isLikelyExceptionAccessor(MethodDeclaration m) {
         String n = m.getNameAsString();
-        return n.equals("getCause") || n.startsWith("get") || n.startsWith("is");
+        if (!(n.equals("getCause") || n.startsWith("get") || n.startsWith("is"))) {
+            return false;
+        }
+        return m.getParameters().isEmpty() && isSimpleGetterShape(m);
     }
 
     private static boolean hasLombokDataCarrierSignal(ClassOrInterfaceDeclaration cdecl) {
