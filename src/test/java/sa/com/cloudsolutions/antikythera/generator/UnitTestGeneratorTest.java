@@ -316,8 +316,13 @@ class UnitTestGeneratorTest {
         // Execute loadExisting
         unitTestGenerator.loadExisting(testFile);
         assertNotNull(unitTestGenerator.gen);
-        assertTrue(unitTestGenerator.gen.toString().contains("Author : Antikythera"));
-
+        // Antikythera-generated methods are removed on reload so they can be regenerated
+        assertFalse(unitTestGenerator.gen.toString().contains("Author : Antikythera"),
+                "Antikythera-generated methods should be stripped so they are regenerated cleanly");
+        // User-written methods (no author marker) must be preserved
+        assertTrue(unitTestGenerator.gen.toString().contains("createUnitTestGeneratorReturnsNonNull"),
+                "User-written methods must survive the reload");
+        // Mock fields are still present, so the mock target should be registered
         assertTrue(MockingRegistry.isMockTarget("java.util.zip.Adler32"));
     }
 

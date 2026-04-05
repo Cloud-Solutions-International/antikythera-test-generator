@@ -230,13 +230,19 @@ public class UnitTestGenerator extends TestGenerator {
         for (TypeDeclaration<?> t : gen.getTypes()) {
             for (MethodDeclaration md : t.getMethods()) {
                 md.getComment().ifPresent(c -> {
-                    if (!c.getContent().contains(TestGenerationConstants.GENERATED_COMMENT_AUTHOR_COMPACT)) {
-                        remove.add(md);
+                    if (c.getContent().contains(TestGenerationConstants.GENERATED_COMMENT_AUTHOR_COMPACT)) {
+                        remove.add(md);  // Remove Antikythera-generated methods; they will be regenerated
                     }
                 });
             }
             for (MethodDeclaration md : remove) {
                 gen.getType(0).remove(md);
+            }
+            // Register retained (user-written) method names so createTestName won't conflict with them
+            for (MethodDeclaration md : t.getMethods()) {
+                if (!remove.contains(md)) {
+                    testMethodNames.add(md.getNameAsString());
+                }
             }
 
             if (t.isClassOrInterfaceDeclaration()) {
