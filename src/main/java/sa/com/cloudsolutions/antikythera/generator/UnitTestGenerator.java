@@ -874,13 +874,16 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     /**
-     * Creates an instance of the class under test
+     * Creates an instance of the class under test.
+     * For static methods the class is not instantiated; the class name is used directly as the receiver.
      */
     @SuppressWarnings("unchecked")
     void createInstance() {
         methodUnderTest.findAncestor(ClassOrInterfaceDeclaration.class).ifPresent(c -> {
             if (isSpringStereotypeBean(c)) {
                 injectMocks(c);
+            } else if (methodUnderTest instanceof MethodDeclaration md && md.isStatic()) {
+                instanceName = c.getNameAsString();
             } else {
                 instanceName = AbstractCompiler.classToInstanceName(c.getNameAsString());
                 getBody(testMethod).addStatement(ArgumentGenerator.instantiateClass(c, instanceName));
