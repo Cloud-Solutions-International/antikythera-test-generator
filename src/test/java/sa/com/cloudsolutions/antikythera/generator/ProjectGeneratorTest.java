@@ -11,6 +11,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Comparator;
 
 class ProjectGeneratorTest {
@@ -65,5 +66,18 @@ class ProjectGeneratorTest {
                 "test" + File.separator + "java" + File.separator + belongingPackage.replace(".", File.separator) + File.separator + filename);
         assertTrue(file.exists());
         assertEquals(content, Files.readString(file.toPath()));
+    }
+
+    @Test
+    void deriveProjectRootStripsSrcTestJavaSuffix() {
+        Path output = tempDir.resolve("generated").resolve("src").resolve("test").resolve("java");
+        assertEquals(tempDir.resolve("generated").toString(), Antikythera.deriveProjectRoot(output.toString()));
+    }
+
+    @Test
+    void deriveProjectRootFallsBackForNonCanonicalOutputPath() {
+        Path output = tempDir.resolve("antikythera");
+        assertEquals(Paths.get(output.toString()).normalize().toString(),
+                Antikythera.deriveProjectRoot(output.toString()));
     }
 }

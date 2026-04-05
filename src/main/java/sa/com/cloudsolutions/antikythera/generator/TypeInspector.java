@@ -11,6 +11,9 @@ public final class TypeInspector {
     }
 
     public static String rawSimpleName(Type type) {
+        if (type.isClassOrInterfaceType()) {
+            return type.asClassOrInterfaceType().getName().getIdentifier();
+        }
         return type.asString().replaceAll("<.*>", "").trim();
     }
 

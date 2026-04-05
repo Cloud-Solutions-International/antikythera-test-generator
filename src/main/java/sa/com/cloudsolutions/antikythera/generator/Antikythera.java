@@ -208,13 +208,27 @@ public class Antikythera {
      * <p>By convention {@code output_path} points to the {@code src/test/java} directory of the
      * generated project (e.g. {@code /foo/bar/src/test/java}).  Stripping those three trailing
      * components yields the project root ({@code /foo/bar}), which is where the Maven project
-     * structure and the generated {@code pom.xml} should live.</p>
+     * structure and the generated {@code pom.xml} should live. If the path does not end with that
+     * suffix, this method falls back to the provided output path.</p>
      *
      * @param outputPath the value of {@code output_path} from the generator configuration
      * @return the project root path
      */
     static String deriveProjectRoot(String outputPath) {
-        return Paths.get(outputPath).getParent().getParent().getParent().toString();
+        Path normalized = Paths.get(outputPath).normalize();
+        Path javaDir = normalized.getFileName() != null && "java".equals(normalized.getFileName().toString())
+                ? normalized : null;
+        Path testDir = javaDir != null ? javaDir.getParent() : null;
+        Path srcDir = testDir != null ? testDir.getParent() : null;
+        if (testDir != null && srcDir != null
+                && "test".equals(testDir.getFileName().toString())
+                && "src".equals(srcDir.getFileName().toString())) {
+            Path projectRoot = srcDir.getParent();
+            if (projectRoot != null) {
+                return projectRoot.toString();
+            }
+        }
+        return normalized.toString();
     }
 
     /**

@@ -58,15 +58,22 @@ class ExceptionResponseAsserterTest {
 
     @Test
     void assertThrowsEmittedForUnconditionalRuntimeException() {
-        classUnderTest.addAnnotation("Service");
-        utg.addBeforeClass();
-        MethodDeclaration md = classUnderTest.getMethodsByName("queries2").getFirst();
-        MethodResponse response = new MethodResponse();
-        response.setException(new EvaluatorException("sym", new RuntimeException("boom")));
+        var saved = new ArrayList<>(classUnderTest.getAnnotations());
+        try {
+            classUnderTest.getAnnotations().clear();
+            classUnderTest.addAnnotation("Service");
+            utg.addBeforeClass();
+            MethodDeclaration md = classUnderTest.getMethodsByName("queries2").getFirst();
+            MethodResponse response = new MethodResponse();
+            response.setException(new EvaluatorException("sym", new RuntimeException("boom")));
 
-        utg.createTests(md, response);
+            utg.createTests(md, response);
 
-        assertTrue(utg.getCompilationUnit().toString().contains("assertThrows"),
-                "Unconditional non-NPE exception should yield assertThrows in generated source");
+            assertTrue(utg.getCompilationUnit().toString().contains("assertThrows"),
+                    "Unconditional non-NPE exception should yield assertThrows in generated source");
+        } finally {
+            classUnderTest.getAnnotations().clear();
+            classUnderTest.getAnnotations().addAll(saved);
+        }
     }
 }
