@@ -778,9 +778,41 @@ public class UnitTestGenerator extends TestGenerator {
         body.addStatement(typeName + " " + varName + " = new " + typeName + "();");
         for (FieldDeclaration field : collectionFields) {
             String fieldName = field.getVariable(0).getNameAsString();
-            TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
-            body.addStatement(String.format("%s.set%s(new ArrayList());",
-                    varName, AbstractCompiler.setterSuffixFromFieldName(fieldName)));
+            String fieldTypeName = TypeInspector.rawSimpleName(field.getElementType());
+            
+            // Map declared types to matching concrete implementations
+            String concreteType;
+            String importClass;
+            switch (fieldTypeName) {
+                case "Set", "HashSet" -> {
+                    concreteType = "HashSet()";
+                    importClass = "java.util.HashSet";
+                }
+                case "LinkedHashSet" -> {
+                    concreteType = "LinkedHashSet()";
+                    importClass = "java.util.LinkedHashSet";
+                }
+                case "Map", "HashMap" -> {
+                    concreteType = "HashMap()";
+                    importClass = "java.util.HashMap";
+                }
+                case "LinkedHashMap" -> {
+                    concreteType = "LinkedHashMap()";
+                    importClass = "java.util.LinkedHashMap";
+                }
+                case "LinkedList" -> {
+                    concreteType = "LinkedList()";
+                    importClass = "java.util.LinkedList";
+                }
+                default -> { // List, ArrayList, Collection
+                    concreteType = "ArrayList()";
+                    importClass = Reflect.JAVA_UTIL_ARRAY_LIST;
+                }
+            }
+            
+            TestGenerator.addImport(new ImportDeclaration(importClass, false, false));
+            body.addStatement(String.format("%s.set%s(new %s);",
+                    varName, AbstractCompiler.setterSuffixFromFieldName(fieldName), concreteType));
         }
         thenReturn.setArgument(0, new NameExpr(varName));
     }
