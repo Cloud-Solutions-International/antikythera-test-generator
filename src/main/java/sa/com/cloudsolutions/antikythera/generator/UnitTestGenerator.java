@@ -111,12 +111,12 @@ public class UnitTestGenerator extends TestGenerator {
     private final Map<String, Boolean> variables = new HashMap<>();
 
     /**
-     * Maps simple type name → field name for non-mock protected/public fields declared in the
-     * base test class (e.g. "Tenant" → "tenant", "MetaData" → "metaData").
+     * Maps simple type name → list of field names for non-mock protected/public fields declared in the
+     * base test class (e.g. "Tenant" → ["tenant", "mainTenant"], "MetaData" → ["metaData"]).
      * Populated when the base class is loaded; used by {@link #tryUseBaseClassField} to emit
      * {@code Type paramName = this.fieldName;} instead of constructing a new instance.
      */
-    private final Map<String, String> baseClassFields = new HashMap<>();
+    private final Map<String, List<String>> baseClassFields = new HashMap<>();
 
     /**
      * Analyzer for determining if test arguments will trigger exceptions.
@@ -178,7 +178,7 @@ public class UnitTestGenerator extends TestGenerator {
 
     /**
      * Collects non-@Mock protected/public fields from a base test class type declaration
-     * into {@link #baseClassFields} (simple type name → field name).
+     * into {@link #baseClassFields} (simple type name → list of field names).
      * Called once per type when the base class is loaded.
      */
     private void extractBaseClassFields(TypeDeclaration<?> t) {
@@ -189,7 +189,7 @@ public class UnitTestGenerator extends TestGenerator {
             if (fd.hasModifier(Modifier.Keyword.PROTECTED) || fd.hasModifier(Modifier.Keyword.PUBLIC)) {
                 String simpleType = fd.getElementType().asString();
                 String fieldName = fd.getVariable(0).getNameAsString();
-                baseClassFields.put(simpleType, fieldName);
+                baseClassFields.computeIfAbsent(simpleType, k -> new ArrayList<>()).add(fieldName);
             }
         }
     }
@@ -198,6 +198,7 @@ public class UnitTestGenerator extends TestGenerator {
      * If the base test class declares a non-mock protected/public field whose simple type
      * matches {@code param}'s type, emits {@code Type paramName = this.fieldName;} and returns
      * {@code true}. The caller should then skip normal mock generation for this parameter.
+     * Prefers exact name match first, then auto-wires by type only if exactly one candidate exists.
      */
     private boolean tryUseBaseClassField(Parameter param) {
         if (baseClassFields.isEmpty()) {
@@ -206,14 +207,31 @@ public class UnitTestGenerator extends TestGenerator {
         String simpleType = param.getType().isClassOrInterfaceType()
                 ? param.getType().asClassOrInterfaceType().getNameAsString()
                 : param.getType().asString();
-        String fieldName = baseClassFields.get(simpleType);
-        if (fieldName == null) {
+        List<String> candidateFields = baseClassFields.get(simpleType);
+        if (candidateFields == null || candidateFields.isEmpty()) {
             return false;
         }
+        
+        String paramName = param.getNameAsString();
+        String selectedField = null;
+        
+        // First, try exact name match
+        if (candidateFields.contains(paramName)) {
+            selectedField = paramName;
+        }
+        // If no exact match and exactly one candidate, use it (auto-wire by type)
+        else if (candidateFields.size() == 1) {
+            selectedField = candidateFields.get(0);
+        }
+        // Multiple candidates with no exact match - cannot auto-wire
+        else {
+            return false;
+        }
+        
         // Add import for the parameter type before using it
         addClassImports(param.getType());
         getBody(testMethod).addStatement(
-                String.format("%s %s = this.%s;", simpleType, param.getNameAsString(), fieldName));
+                String.format("%s %s = this.%s;", simpleType, paramName, selectedField));
         return true;
     }
 
@@ -716,7 +734,9 @@ public class UnitTestGenerator extends TestGenerator {
             case "Integer", "int" -> new IntegerLiteralExpr("0");
             case "Boolean", "boolean" -> new BooleanLiteralExpr(false);
             case "Double", "double", "Float", "float" -> StaticJavaParser.parseExpression("0.0");
-            case "Short", "short", "Byte", "byte", "Character", "char" -> new IntegerLiteralExpr("0");
+            case "Short", "short" -> StaticJavaParser.parseExpression("(short)0");
+            case "Byte", "byte" -> StaticJavaParser.parseExpression("(byte)0");
+            case "Character", "char" -> StaticJavaParser.parseExpression("'\\u0000'");
             default -> {
                 Object defaultValue = Reflect.getDefault(simpleName);
                 yield defaultValue != null ? Reflect.createLiteralExpression(defaultValue) : null;
@@ -1750,7 +1770,9 @@ public class UnitTestGenerator extends TestGenerator {
         if (type.isClassOrInterfaceType()) {
             String name = type.asClassOrInterfaceType().getNameAsString();
             return Optional.ofNullable(switch (name) {
-                case "Integer", "Byte", "Short" -> "0";
+                case "Integer" -> "0";
+                case "Byte" -> "(byte)0";
+                case "Short" -> "(short)0";
                 case "Long" -> "0L";
                 case "Boolean" -> "false";
                 case "Character" -> "'\\0'";
