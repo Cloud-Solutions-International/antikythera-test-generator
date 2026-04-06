@@ -42,8 +42,12 @@ public class ExceptionAnalyzer {
                 // Exception occurred during loop - always CONDITIONAL_ON_LOOP
                 // because it depends on collection having elements to iterate
                 logger.debug("Exception classified as CONDITIONAL_ON_LOOP - occurred during loop iteration");
-                return ExceptionType.CONDITIONAL_ON_LOOP;
+            } else {
+                // isInsideLoop() is true but getLoopContext() is null - still treat as loop-conditional
+                // to avoid over-generating assertThrows for loop bodies
+                logger.debug("Exception classified as CONDITIONAL_ON_LOOP - inside loop but missing LoopContext");
             }
+            return ExceptionType.CONDITIONAL_ON_LOOP;
         }
 
         // Check if exception is inside validation pattern
@@ -184,11 +188,31 @@ public class ExceptionAnalyzer {
 
     /**
      * Try to find the parameter name for a collection variable.
-     * This is a best-effort heuristic.
+     * This method matches the collectionVar against testArgs using multiple strategies:
+     * 1. Exact name match
+     * 2. Type/instance compatibility check
+     * 3. Parameter name heuristics
+     * 4. Single parameter fallback
      */
     private String findCollectionParameterName(Variable collectionVar, Map<String, Expression> testArgs) {
-        // Simple heuristic: if collection value is a List/Set/Collection type parameter
-        // Try to match by type
+        if (collectionVar == null || testArgs == null) {
+            return null;
+        }
+
+        // Strategy 1: Check for exact name match first
+        String collectionName = collectionVar.getName();
+        if (collectionName != null && testArgs.containsKey(collectionName)) {
+            return collectionName;
+        }
+
+        // Strategy 2: Match by type/instance compatibility
+        for (Map.Entry<String, Expression> entry : testArgs.entrySet()) {
+            if (isCompatibleCollectionType(collectionVar) && looksLikeCollectionExpression(entry.getValue())) {
+                return entry.getKey();
+            }
+        }
+
+        // Strategy 3: Fallback to parameter name heuristics
         for (Map.Entry<String, Expression> entry : testArgs.entrySet()) {
             String paramName = entry.getKey();
             String paramLower = paramName.toLowerCase();
@@ -202,12 +226,75 @@ public class ExceptionAnalyzer {
             }
         }
         
-        // If only one parameter and it's collection-like, use it
+        // Strategy 4: If only one parameter, assume it's the collection
         if (testArgs.size() == 1) {
             return testArgs.keySet().iterator().next();
         }
         
         return null;
+    }
+
+    /**
+     * Check if the collectionVar is compatible with a test argument by type or instance.
+     */
+    private boolean isCompatibleCollectionType(Variable collectionVar) {
+        // Check by Class if available
+        Class<?> collectionClass = collectionVar.getClazz();
+        if (collectionClass != null) {
+            return isCollectionClass(collectionClass);
+        }
+
+        // Check by Type if available
+        if (collectionVar.getType() != null) {
+            String typeName = collectionVar.getType().asString();
+            return isCollectionTypeName(typeName);
+        }
+
+        // Check by value instance
+        Object value = collectionVar.getValue();
+        return value instanceof Collection<?>;
+    }
+
+    /**
+     * Check if a Class represents a collection type.
+     */
+    private boolean isCollectionClass(Class<?> clazz) {
+        return Collection.class.isAssignableFrom(clazz)
+            || java.util.List.class.isAssignableFrom(clazz)
+            || java.util.Set.class.isAssignableFrom(clazz)
+            || Iterable.class.isAssignableFrom(clazz);
+    }
+
+    /**
+     * Check if a type name represents a collection type.
+     */
+    private boolean isCollectionTypeName(String typeName) {
+        return typeName.contains("List")
+            || typeName.contains("Set")
+            || typeName.contains("Collection")
+            || typeName.contains("Iterable")
+            || typeName.equals("ArrayList")
+            || typeName.equals("HashSet")
+            || typeName.equals("TreeSet");
+    }
+
+    /**
+     * Check if an expression looks like a collection creation or literal.
+     */
+    private boolean looksLikeCollectionExpression(Expression expr) {
+        String exprStr = expr.toString();
+        
+        // Check for common collection creation patterns
+        return exprStr.contains("List.of")
+            || exprStr.contains("Set.of")
+            || exprStr.contains("new ArrayList")
+            || exprStr.contains("new HashSet")
+            || exprStr.contains("new TreeSet")
+            || exprStr.contains("new LinkedList")
+            || exprStr.contains("Collections.emptyList")
+            || exprStr.contains("Collections.emptySet")
+            || exprStr.contains("Collections.singletonList")
+            || exprStr.contains("Arrays.asList");
     }
 
     /**

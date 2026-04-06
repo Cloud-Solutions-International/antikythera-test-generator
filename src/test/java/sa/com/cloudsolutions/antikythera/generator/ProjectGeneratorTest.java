@@ -80,4 +80,13 @@ class ProjectGeneratorTest {
         assertEquals(Paths.get(output.toString()).normalize().toString(),
                 Antikythera.deriveProjectRoot(output.toString()));
     }
+
+    @Test
+    void deriveProjectRootThrowsForShallowSrcTestJavaPath() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> Antikythera.deriveProjectRoot("src/test/java"));
+        assertTrue(ex.getMessage().contains("output_path"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("src/test/java"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("too shallow"), ex.getMessage());
+    }
 }

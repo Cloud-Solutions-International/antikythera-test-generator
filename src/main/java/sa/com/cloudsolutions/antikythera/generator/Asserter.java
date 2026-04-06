@@ -78,9 +78,10 @@ public abstract class Asserter {
          * The evaluator fabricates empty collections to keep traversal alive, but DTOs with no
          * declared collection initializer often still return null at runtime after mapping.
          * Only size-assert those fields when the source field itself declares a concrete
-         * initializer.
+         * initializer, OR when the collection is populated (non-empty).
          */
-        return fieldVariable.getInitializer().isEmpty();
+        Collection<?> collection = (Collection<?>) value.getValue();
+        return collection.isEmpty() && fieldVariable.getInitializer().isEmpty();
     }
 
     private String findGetter(Variable value, String fieldName, TypeDeclaration<?> type) {

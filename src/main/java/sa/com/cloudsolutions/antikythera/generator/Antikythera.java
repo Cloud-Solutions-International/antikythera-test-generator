@@ -209,26 +209,35 @@ public class Antikythera {
      * generated project (e.g. {@code /foo/bar/src/test/java}).  Stripping those three trailing
      * components yields the project root ({@code /foo/bar}), which is where the Maven project
      * structure and the generated {@code pom.xml} should live. If the path does not end with that
-     * suffix, this method falls back to the provided output path.</p>
+     * suffix, this method falls back to the provided output path. If it does end with that suffix
+     * but is too shallow to derive a parent project directory, this method throws an
+     * {@link IllegalArgumentException}.</p>
      *
      * @param outputPath the value of {@code output_path} from the generator configuration
      * @return the project root path
      */
     static String deriveProjectRoot(String outputPath) {
-        Path normalized = Paths.get(outputPath).normalize();
-        Path javaDir = normalized.getFileName() != null && "java".equals(normalized.getFileName().toString())
-                ? normalized : null;
-        Path testDir = javaDir != null ? javaDir.getParent() : null;
-        Path srcDir = testDir != null ? testDir.getParent() : null;
-        if (testDir != null && srcDir != null
-                && "test".equals(testDir.getFileName().toString())
-                && "src".equals(srcDir.getFileName().toString())) {
-            Path projectRoot = srcDir.getParent();
-            if (projectRoot != null) {
-                return projectRoot.toString();
+        Path p = Paths.get(outputPath).normalize();
+        Path parent = p.getParent();
+        Path grandParent = parent != null ? parent.getParent() : null;
+        Path greatGrandParent = grandParent != null ? grandParent.getParent() : null;
+
+        if (p.getFileName() != null
+                && "java".equals(p.getFileName().toString())
+                && parent != null
+                && parent.getFileName() != null
+                && "test".equals(parent.getFileName().toString())
+                && grandParent != null
+                && grandParent.getFileName() != null
+                && "src".equals(grandParent.getFileName().toString())) {
+            if (greatGrandParent == null) {
+                throw new IllegalArgumentException("Invalid generator configuration: output_path '"
+                        + outputPath
+                        + "' is too shallow to derive project root. Expected a path like <project>/src/test/java.");
             }
+            return greatGrandParent.toString();
         }
-        return normalized.toString();
+        return p.toString();
     }
 
     /**
