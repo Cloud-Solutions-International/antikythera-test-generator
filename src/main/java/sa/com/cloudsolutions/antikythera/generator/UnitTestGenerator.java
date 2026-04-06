@@ -365,9 +365,28 @@ public class UnitTestGenerator extends TestGenerator {
                     gen.addImport(wrapper.getImport());
                 }
             }
+        } else if (response.isFpApplicationTest()) {
+            addFPApplicationAsserts(response, invocation);
         } else {
             handleExceptionResponse(response, invocation);
         }
+    }
+
+    /**
+     * Generates assertions for a functional-application test. The primary invocation is added
+     * as a plain statement (so {@code resp} is bound), then the FP application call is wrapped
+     * in {@code assertThrows}.
+     *
+     * <p>Example output:
+     * <pre>
+     *     Specification resp = MySpec.build(model);
+     *     assertThrows(NullPointerException.class, () -> resp.toPredicate(null, null, null));
+     * </pre>
+     */
+    private void addFPApplicationAsserts(MethodResponse response, String invocation) {
+        BlockStmt body = getBody(testMethod);
+        body.addStatement(invocation);
+        assertThrows(response.getFpApplicationCall(), response);
     }
 
     /**

@@ -37,7 +37,11 @@ public abstract class Asserter {
 
     private void addFieldAsserts(BlockStmt body, Evaluator ev) {
         int i = 0;
-        TypeDeclaration<?> type = AntikytheraRunTime.getTypeDeclaration(ev.getClassName()).orElseThrow();
+        var typeOpt = AntikytheraRunTime.getTypeDeclaration(ev.getClassName());
+        if (typeOpt.isEmpty()) {
+            return;
+        }
+        TypeDeclaration<?> type = typeOpt.get();
         for(FieldDeclaration field : type.getFields()) {
             VariableDeclarator fieldVariable = field.getVariable(0);
             try {
