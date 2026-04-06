@@ -1860,8 +1860,45 @@ public class UnitTestGenerator extends TestGenerator {
         if (removedDuplicates) {
             logger.info("Removed duplicate test methods from {}", filePath);
         }
+        pruneUnusedImports();
         String content = gen.toString();
         Antikythera.getInstance().writeFile(filePath, content);
+    }
+
+    /**
+     * Removes imports whose simple class name does not appear in the non-import
+     * portion of the generated file. Wildcard and static imports are always kept.
+     */
+    private void pruneUnusedImports() {
+        String source = gen.toString();
+        String[] lines = source.split("\n");
+
+        // Find the index of the last import line so we only search the class body
+        int lastImportLine = -1;
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].trim().startsWith("import ")) {
+                lastImportLine = i;
+            }
+        }
+
+        final String body;
+        if (lastImportLine >= 0 && lastImportLine + 1 < lines.length) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = lastImportLine + 1; i < lines.length; i++) {
+                sb.append(lines[i]).append('\n');
+            }
+            body = sb.toString();
+        } else {
+            body = source;
+        }
+
+        gen.getImports().removeIf(imp -> {
+            if (imp.isAsterisk() || imp.isStatic()) {
+                return false;
+            }
+            String simpleName = imp.getName().getIdentifier();
+            return !body.contains(simpleName);
+        });
     }
 
     static void replaceInitializer(MethodDeclaration method, String name, Expression initialization) {
