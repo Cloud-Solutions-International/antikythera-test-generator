@@ -69,6 +69,10 @@ public abstract class TestGenerator implements ITestGenerator {
         return GeneratorState.getImports();
     }
 
+    public static void clearImports() {
+        GeneratorState.clearImports();
+    }
+
     protected String createTestName(CallableDeclaration<?> md) {
         StringBuilder paramNames = new StringBuilder();
         for(var param : md.getParameters()) {

@@ -4,6 +4,7 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.expr.Expression;
@@ -277,11 +278,23 @@ public final class TargetClassifier {
             if (!"main".equals(m.getNameAsString())) {
                 continue;
             }
+            if (!m.getType().isVoidType()) {
+                continue;
+            }
             if (m.getParameters().size() != 1) {
                 continue;
             }
-            String ptype = m.getParameter(0).getType().asString();
-            if (ptype.endsWith("String[]") || ptype.endsWith("java.lang.String[]")) {
+            Parameter p = m.getParameter(0);
+            String ptype = p.getType().asString();
+            
+            // Check for array form: String[] or java.lang.String[]
+            boolean isArrayForm = ptype.endsWith("String[]") || ptype.endsWith("java.lang.String[]");
+            
+            // Check for varargs form: String... 
+            boolean isVarargsForm = p.isVarArgs() && 
+                    (ptype.equals("String") || ptype.equals("java.lang.String"));
+            
+            if (isArrayForm || isVarargsForm) {
                 return true;
             }
         }

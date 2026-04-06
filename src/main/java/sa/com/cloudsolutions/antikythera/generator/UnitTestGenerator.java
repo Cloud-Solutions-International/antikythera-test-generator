@@ -135,6 +135,7 @@ public class UnitTestGenerator extends TestGenerator {
      */
     public UnitTestGenerator(CompilationUnit cu, GeneratorSeams generatorSeams) {
         super(cu);
+        clearImports();
         this.mockFieldSupport = new MockFieldSupport(this, Objects.requireNonNull(generatorSeams));
         String packageDecl = cu.getPackageDeclaration().map(PackageDeclaration::getNameAsString).orElse("");
         String basePath = Settings.getProperty(Settings.BASE_PATH, String.class).orElseThrow();

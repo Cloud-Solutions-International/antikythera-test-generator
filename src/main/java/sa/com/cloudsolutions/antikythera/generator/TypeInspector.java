@@ -40,6 +40,16 @@ public final class TypeInspector {
                 || raw.equals("LinkedHashMap");
     }
 
+    /**
+     * Collection types for field mocking and dependency setup (excludes Maps).
+     */
+    public static boolean isCollectionType(Type type) {
+        String raw = rawSimpleName(type);
+        return raw.equals("List") || raw.equals("ArrayList") || raw.equals("LinkedList")
+                || raw.equals("Set") || raw.equals("HashSet") || raw.equals("LinkedHashSet")
+                || raw.equals("Collection");
+    }
+
     public static boolean isMapType(Type type) {
         if (!type.isClassOrInterfaceType()) {
             return false;

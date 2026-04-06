@@ -66,7 +66,8 @@ final class MockFieldSupport {
 
     void discoverFieldsToMock(CompilationUnit cu) {
         for (TypeDeclaration<?> decl : cu.getTypes()) {
-            if (decl instanceof ClassOrInterfaceDeclaration c && UnitTestGenerator.isSpringStereotypeBean(c)) {
+            if (decl instanceof ClassOrInterfaceDeclaration c && UnitTestGenerator.isSpringStereotypeBean(c)
+                    && owner.findSuite(decl).isPresent()) {
                 detectConstructorInjection(cu, decl);
             }
             identifyAutoWiring(cu, decl);
@@ -251,7 +252,7 @@ final class MockFieldSupport {
             addMapSetterStub(body, nameAsString, setterName);
             return;
         }
-        if (value instanceof List || (value == null && TypeInspector.isCollectionOrMapFieldType(fieldVar.getType()))) {
+        if (value instanceof List || (value == null && TypeInspector.isCollectionType(fieldVar.getType()))) {
             addListCollectionSetterStub(body, nameAsString, setterName);
             return;
         }
