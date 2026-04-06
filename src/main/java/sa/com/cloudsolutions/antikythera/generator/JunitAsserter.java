@@ -60,15 +60,13 @@ public class JunitAsserter extends Asserter {
         /*
          * NumericComparator used to throw IllegalArgumentException("Cannot compare X and null") while the
          * JVM throws NullPointerException from Comparable.compareTo(null) or from null Date.toInstant().
-         * The cause may also be a bare IllegalArgumentException (no message) under EvaluatorException.
          * Generated Mockito tests often hit NPE at runtime; align the expected type.
          */
         Throwable deepest = deepestNonWrapperCause(ex);
         if (deepest instanceof IllegalArgumentException iae) {
             String msg = iae.getMessage();
             boolean numericComparatorNullOperand = msg != null && msg.contains("Cannot compare") && msg.contains("null");
-            boolean bareFromEvaluator = (msg == null || msg.isEmpty()) && ex instanceof sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
-            if (numericComparatorNullOperand || bareFromEvaluator) {
+            if (numericComparatorNullOperand) {
                 exceptionClass = NullPointerException.class.getName();
             }
         }

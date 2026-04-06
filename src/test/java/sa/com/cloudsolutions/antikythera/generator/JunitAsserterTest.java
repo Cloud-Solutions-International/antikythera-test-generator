@@ -105,12 +105,12 @@ class JunitAsserterTest {
     }
 
     @Test
-    void assertThrowsMapsBareIaeCauseFromEvaluatorExceptionToNpe() {
+    void assertThrowsKeepsBareIaeCauseFromEvaluatorExceptionAsIae() {
         MethodResponse response = new MethodResponse();
         response.setException(new EvaluatorException("wrap", new IllegalArgumentException()));
 
         Expression expr = asserter.assertThrows("someMethod()", response);
-        assertEquals("assertThrows(java.lang.NullPointerException.class, () -> someMethod())", expr.toString());
+        assertEquals("assertThrows(java.lang.IllegalArgumentException.class, () -> someMethod())", expr.toString());
     }
 
     private static final class JsonIOException extends RuntimeException {

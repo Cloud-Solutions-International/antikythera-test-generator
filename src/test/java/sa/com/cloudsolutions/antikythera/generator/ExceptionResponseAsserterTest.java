@@ -17,7 +17,15 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.IntegerLiteralExpr;
+import com.github.javaparser.ast.expr.StringLiteralExpr;
+import sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Targets {@link ExceptionResponseAsserter} outcomes (legacy assertThrows, unconditional assertThrows).
@@ -75,5 +83,115 @@ class ExceptionResponseAsserterTest {
             classUnderTest.getAnnotations().clear();
             classUnderTest.getAnnotations().addAll(saved);
         }
+    }
+
+    /**
+     * Test the specific path where both illegalArgumentSuppressionApplied and reinstatedNpe become true,
+     * ensuring the exception type becomes EvaluatorException(NPE) as expected.
+     * 
+     * This test verifies that when:
+     * 1. shouldSuppressIllegalArgumentAssertThrows returns true (sets illegalArgumentSuppressionApplied = true)
+     * 2. hasWhenStubs() returns false OR hasNullThenReturnStubs() returns true (sets reinstatedNpe = true)
+     * 
+     * Then the response exception is mutated to EvaluatorException wrapping a NPE.
+     */
+    @Test
+    void bothIllegalArgumentSuppressionAndNpeReinstatementApplied() {
+        // Setup test method with no when stubs to trigger reinstatedNpe = true
+        MethodDeclaration md = classUnderTest.getMethodsByName("queries2").getFirst();
+        utg.createTests(md, new MethodResponse()); // Create base test method structure
+        
+        // Create mock UnitTestGenerator to control the specific methods
+        UnitTestGenerator mockUtg = spy(utg);
+        
+        // Setup exception context that would trigger IllegalArgumentException suppression
+        ExceptionContext ctx = mock(ExceptionContext.class);
+        when(ctx.getException()).thenReturn(new IllegalArgumentException("Mock IAE for testing"));
+        
+        // Create test response with the exception context
+        MethodResponse response = new MethodResponse();
+        response.setExceptionContext(ctx);
+        response.setException(new EvaluatorException("test", new IllegalArgumentException("test IAE")));
+        
+        // Setup test arguments that won't trigger the exception (non-null, non-empty)
+        Map<String, Expression> testArgs = new HashMap<>();
+        testArgs.put("param1", new StringLiteralExpr("non-null"));
+        testArgs.put("param2", new IntegerLiteralExpr("42"));
+        
+        // Mock the methods to control the flow:
+        // 1. shouldSuppressIllegalArgumentAssertThrows should return true (for illegalArgumentSuppressionApplied = true)
+        doReturn(true).when(mockUtg).shouldSuppressIllegalArgumentAssertThrows(any(), any());
+        
+        // 2. hasWhenStubs should return false (for reinstatedNpe = true)
+        doReturn(false).when(mockUtg).hasWhenStubs();
+        
+        // 3. extractTestArguments should return our controlled test args
+        doReturn(testArgs).when(mockUtg).extractTestArguments();
+        
+        // Mock other necessary methods to avoid side effects
+        doNothing().when(mockUtg).seedCollectionArgumentsForException(any(), any());
+        doNothing().when(mockUtg).assertThrows(anyString(), any(MethodResponse.class));
+        
+        // Create and execute the ExceptionResponseAsserter
+        ExceptionResponseAsserter asserter = new ExceptionResponseAsserter(mockUtg);
+        asserter.handle(response, "mockService.testMethod()");
+        
+        // Verify that the exception was mutated to EvaluatorException(NPE)
+        Exception resultException = response.getException();
+        assertTrue(resultException instanceof EvaluatorException, 
+                "Expected EvaluatorException but got: " + resultException.getClass().getSimpleName());
+        
+        EvaluatorException evaluatorException = (EvaluatorException) resultException;
+        assertTrue(evaluatorException.getCause() instanceof NullPointerException,
+                "Expected NPE as cause but got: " + 
+                (evaluatorException.getCause() != null ? evaluatorException.getCause().getClass().getSimpleName() : "null"));
+        
+        assertEquals("Reinstated assertThrows for runtime NPE", evaluatorException.getMessage(),
+                "Expected specific message for reinstated NPE");
+        
+        // Verify that assertThrows was called (willTrigger = true due to reinstatement)
+        verify(mockUtg, times(1)).assertThrows(anyString(), eq(response));
+    }
+
+    @Test 
+    void bothIllegalArgumentSuppressionAndNpeReinstatementWithNullThenReturnStubs() {
+        // Alternative test path: reinstatedNpe = true via hasNullThenReturnStubs() = true
+        MethodDeclaration md = classUnderTest.getMethodsByName("queries2").getFirst();
+        utg.createTests(md, new MethodResponse());
+        
+        UnitTestGenerator mockUtg = spy(utg);
+        
+        // Setup exception context for IAE suppression
+        ExceptionContext ctx = mock(ExceptionContext.class);
+        when(ctx.getException()).thenReturn(new IllegalArgumentException("Mock IAE"));
+        
+        MethodResponse response = new MethodResponse();
+        response.setExceptionContext(ctx);
+        response.setException(new EvaluatorException("test", new IllegalArgumentException("test IAE")));
+        
+        Map<String, Expression> testArgs = new HashMap<>();
+        testArgs.put("param1", new StringLiteralExpr("non-null"));
+        
+        // Control flow: suppression = true, hasWhenStubs = true, but hasNullThenReturnStubs = true
+        doReturn(true).when(mockUtg).shouldSuppressIllegalArgumentAssertThrows(any(), any());
+        doReturn(true).when(mockUtg).hasWhenStubs(); // This time hasWhenStubs = true
+        doReturn(true).when(mockUtg).hasNullThenReturnStubs(); // But this returns true -> reinstatedNpe = true
+        doReturn(testArgs).when(mockUtg).extractTestArguments();
+        
+        doNothing().when(mockUtg).seedCollectionArgumentsForException(any(), any());
+        doNothing().when(mockUtg).assertThrows(anyString(), any(MethodResponse.class));
+        
+        ExceptionResponseAsserter asserter = new ExceptionResponseAsserter(mockUtg);
+        asserter.handle(response, "mockService.testMethod()");
+        
+        // Verify same mutation occurs
+        Exception resultException = response.getException();
+        assertTrue(resultException instanceof EvaluatorException);
+        
+        EvaluatorException evaluatorException = (EvaluatorException) resultException;
+        assertTrue(evaluatorException.getCause() instanceof NullPointerException);
+        assertEquals("Reinstated assertThrows for runtime NPE", evaluatorException.getMessage());
+        
+        verify(mockUtg, times(1)).assertThrows(anyString(), eq(response));
     }
 }
