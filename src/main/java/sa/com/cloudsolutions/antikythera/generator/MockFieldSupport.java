@@ -213,6 +213,12 @@ final class MockFieldSupport {
         body.addStatement(String.format("%s.%s(new ArrayList());", receiverName, setterName));
     }
 
+    private void addMapSetterStub(BlockStmt body, String receiverName, String setterName) {
+        TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_MAP, false, false));
+        TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_HASH_MAP, false, false));
+        body.addStatement(String.format("%s.%s(new HashMap());", receiverName, setterName));
+    }
+
     private void addSetterCallWithCoercedInitializer(BlockStmt body, String receiverName, String setterName,
             TypeDeclaration<?> ownerType, Expression fieldInitializer) {
         Expression coercedInitializer = fieldInitializer;
@@ -241,6 +247,10 @@ final class MockFieldSupport {
         }
         Variable fieldVar = eval.getField(name);
         Object value = fieldVar.getValue();
+        if (value instanceof Map || (value == null && TypeInspector.isMapType(fieldVar.getType()))) {
+            addMapSetterStub(body, nameAsString, setterName);
+            return;
+        }
         if (value instanceof List || (value == null && TypeInspector.isCollectionOrMapFieldType(fieldVar.getType()))) {
             addListCollectionSetterStub(body, nameAsString, setterName);
             return;
@@ -335,10 +345,11 @@ final class MockFieldSupport {
                         nameAsString,
                         JavaBeansConventions.getterMethodNameForField(field), value));
             } else {
+                String returnValue = value instanceof Long ? value + "L" : String.valueOf(value);
                 body.addStatement(String.format("Mockito.when(%s.%s()).thenReturn(%s);",
                         nameAsString,
                         JavaBeansConventions.getterMethodNameForField(field),
-                        value instanceof Long ? value + "L" : value.toString()));
+                        returnValue));
             }
         }
     }

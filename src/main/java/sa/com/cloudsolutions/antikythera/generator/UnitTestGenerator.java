@@ -1917,16 +1917,18 @@ public class UnitTestGenerator extends TestGenerator {
                     if (mce.getArguments().isEmpty()) {
                         return StaticJavaParser.parseExpression("new java.util.ArrayList<>()");
                     } else {
+                        String allArgs = mce.getArguments().stream().map(Object::toString).collect(java.util.stream.Collectors.joining(", "));
                         return StaticJavaParser.parseExpression(
-                                String.format("new java.util.ArrayList<>(java.util.Arrays.asList(%s))", mce.getArgument(0)));
+                                String.format("new java.util.ArrayList<>(java.util.Arrays.asList(%s))", allArgs));
                     }
                 }
                 if (scope.equals(TestGenerationConstants.SET_FACTORY_SCOPE)) {
                     if (mce.getArguments().isEmpty()) {
                         return StaticJavaParser.parseExpression("new java.util.HashSet<>()");
                     } else {
+                        String allArgs = mce.getArguments().stream().map(Object::toString).collect(java.util.stream.Collectors.joining(", "));
                         return StaticJavaParser.parseExpression(
-                                String.format("new java.util.HashSet<>(java.util.Arrays.asList(%s))", mce.getArgument(0)));
+                                String.format("new java.util.HashSet<>(java.util.Arrays.asList(%s))", allArgs));
                     }
                 }
             }

@@ -1088,6 +1088,54 @@ class UnitTestGeneratorMoreTests extends TestHelper {
         assertFalse(unitTestGenerator.testMethod.getBody().orElseThrow().isEmpty());
     }
 
+    @Test
+    void mockFieldWithSetterUsesHashMapForMapFields() throws Exception {
+        setupMethod(CONDITIONAL, "main");
+
+        CompilationUnit ownerCu = StaticJavaParser.parse("class Holder {"
+                + " private Map<String, String> props;"
+                + " public void setProps(Map<String, String> props) { this.props = props; }"
+                + "}");
+        TypeDeclaration<?> ownerType = ownerCu.getType(0);
+        FieldDeclaration field = ownerType.getFieldByName("props").orElseThrow();
+
+        Evaluator eval = Mockito.mock(Evaluator.class);
+        Variable mapVar = new Variable(StaticJavaParser.parseType("Map<String, String>"));
+        Mockito.when(eval.getField("props")).thenReturn(mapVar);
+
+        MockFieldSupport support = new MockFieldSupport(unitTestGenerator, GeneratorSeams.defaults());
+        Method method = MockFieldSupport.class.getDeclaredMethod("mockFieldWithSetter",
+                String.class, Evaluator.class, TypeDeclaration.class, FieldDeclaration.class);
+        method.setAccessible(true);
+        method.invoke(support, "holder", eval, ownerType, field);
+
+        String body = unitTestGenerator.testMethod.getBody().orElseThrow().toString();
+        assertTrue(body.contains("holder.setProps(new HashMap());"), body);
+        assertFalse(body.contains("holder.setProps(new ArrayList());"), body);
+    }
+
+    @Test
+    void mockFieldWithMockitoHandlesNullMockableFieldValue() throws Exception {
+        setupMethod(CONDITIONAL, "main");
+
+        FieldDeclaration field = StaticJavaParser
+                .parseBodyDeclaration("private Map<String, String> props;")
+                .asFieldDeclaration();
+
+        Evaluator eval = Mockito.mock(Evaluator.class);
+        Variable mapVar = new Variable(StaticJavaParser.parseType("Map<String, String>"));
+        Mockito.when(eval.getField("props")).thenReturn(mapVar);
+
+        MockFieldSupport support = new MockFieldSupport(unitTestGenerator, GeneratorSeams.defaults());
+        Method method = MockFieldSupport.class.getDeclaredMethod("mockFieldWithMockito",
+                String.class, Evaluator.class, FieldDeclaration.class);
+        method.setAccessible(true);
+        method.invoke(support, "holder", eval, field);
+
+        String body = unitTestGenerator.testMethod.getBody().orElseThrow().toString();
+        assertTrue(body.contains("Mockito.when(holder.getProps()).thenReturn(null);"), body);
+    }
+
     private static Variable mockParameterFieldsHelper(Evaluator eval) {
         Variable v = new Variable(eval);
         Variable shagrat = new Variable("Shagrat");
@@ -1193,6 +1241,36 @@ class VariableInitializationModifierTest {
 
         assertTrue(method.toString().contains("String test = \"new\""));
         assertTrue(method.toString().contains("int other = 5"));
+    }
+
+    @Test
+    void coerceListOfWithMultipleArguments() throws Exception {
+        Expression listOfExpr = StaticJavaParser.parseExpression("List.of(1, 2, 3)");
+        ClassOrInterfaceType targetType = StaticJavaParser.parseClassOrInterfaceType("List");
+
+        Method coerceMethod = UnitTestGenerator.class.getDeclaredMethod("coerceInitializer", Expression.class, Type.class);
+        coerceMethod.setAccessible(true);
+        Expression result = (Expression) coerceMethod.invoke(null, listOfExpr, targetType);
+
+        String resultStr = result.toString();
+        assertTrue(resultStr.contains("new java.util.ArrayList<>"), resultStr);
+        assertTrue(resultStr.contains("Arrays.asList(1, 2, 3)"), 
+                "Expected all arguments preserved but got: " + resultStr);
+    }
+
+    @Test
+    void coerceSetOfWithMultipleArguments() throws Exception {
+        Expression setOfExpr = StaticJavaParser.parseExpression("Set.of(\"a\", \"b\", \"c\")");
+        ClassOrInterfaceType targetType = StaticJavaParser.parseClassOrInterfaceType("Set");
+
+        Method coerceMethod = UnitTestGenerator.class.getDeclaredMethod("coerceInitializer", Expression.class, Type.class);
+        coerceMethod.setAccessible(true);
+        Expression result = (Expression) coerceMethod.invoke(null, setOfExpr, targetType);
+
+        String resultStr = result.toString();
+        assertTrue(resultStr.contains("new java.util.HashSet<>"), resultStr);
+        assertTrue(resultStr.contains("Arrays.asList(\"a\", \"b\", \"c\")"), 
+                "Expected all arguments preserved but got: " + resultStr);
     }
 
     @Test
