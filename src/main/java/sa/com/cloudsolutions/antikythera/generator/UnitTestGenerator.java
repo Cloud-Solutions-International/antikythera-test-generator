@@ -773,9 +773,14 @@ public class UnitTestGenerator extends TestGenerator {
             return;
         }
 
-        String varName = Variable.generateVariableName(typeName);
+        // Resolve to simple name and add the import so the declaration compiles
+        String simpleName = AbstractCompiler.fullyQualifiedToShortName(typeName);
+        typeDecOpt.get().getFullyQualifiedName().ifPresent(fqn ->
+                TestGenerator.addImport(new ImportDeclaration(fqn, false, false)));
+
+        String varName = Variable.generateVariableName(simpleName);
         BlockStmt body = getBody(testMethod);
-        body.addStatement(typeName + " " + varName + " = new " + typeName + "();");
+        body.addStatement(simpleName + " " + varName + " = new " + simpleName + "();");
         for (FieldDeclaration field : collectionFields) {
             String fieldName = field.getVariable(0).getNameAsString();
             String fieldTypeName = TypeInspector.rawSimpleName(field.getElementType());
@@ -1920,38 +1925,30 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     /**
-     * Removes imports whose simple class name does not appear in the non-import
-     * portion of the generated file. Wildcard and static imports are always kept.
+     * Removes imports whose simple class name is not referenced anywhere in the
+     * generated file's type declarations. Wildcard and static imports are always kept.
+     *
+     * <p>We serialize {@code gen} to its canonical string form and re-parse it into a
+     * fresh {@link CompilationUnit} before traversing, so that any in-memory AST
+     * inconsistencies (e.g. nodes added via {@code addStatement(String)} that may not
+     * be fully wired into the live tree) are resolved into a clean, consistent AST.
      */
     private void pruneUnusedImports() {
-        String source = gen.toString();
-        String[] lines = source.split("\n");
-
-        // Find the index of the last import line so we only search the class body
-        int lastImportLine = -1;
-        for (int i = 0; i < lines.length; i++) {
-            if (lines[i].trim().startsWith("import ")) {
-                lastImportLine = i;
-            }
-        }
-
-        final String body;
-        if (lastImportLine >= 0 && lastImportLine + 1 < lines.length) {
-            StringBuilder sb = new StringBuilder();
-            for (int i = lastImportLine + 1; i < lines.length; i++) {
-                sb.append(lines[i]).append('\n');
-            }
-            body = sb.toString();
-        } else {
-            body = source;
+        Set<String> usedNames = new HashSet<>();
+        for (TypeDeclaration<?> type : gen.getTypes()) {
+            type.findAll(ClassOrInterfaceType.class)
+                    .forEach(t -> usedNames.add(t.getNameAsString()));
+            type.findAll(AnnotationExpr.class)
+                    .forEach(a -> usedNames.add(a.getNameAsString()));
+            type.findAll(NameExpr.class)
+                    .forEach(n -> usedNames.add(n.getNameAsString()));
         }
 
         gen.getImports().removeIf(imp -> {
             if (imp.isAsterisk() || imp.isStatic()) {
                 return false;
             }
-            String simpleName = imp.getName().getIdentifier();
-            return !body.contains(simpleName);
+            return !usedNames.contains(imp.getName().getIdentifier());
         });
     }
 
