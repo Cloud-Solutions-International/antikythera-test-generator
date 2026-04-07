@@ -245,7 +245,8 @@ public class UnitTestGenerator extends TestGenerator {
      */
     void loadExisting(File file) throws FileNotFoundException {
         gen = StaticJavaParser.parse(file);
-        // Remove stale bad imports: internal antikythera classes and private JDK inner classes ($)
+        // Remove stale bad imports carried over from previous generator runs (GeneratorState.addImport
+        // now rejects these, but files written by older versions may still contain them).
         gen.getImports().removeIf(imp -> {
             String name = imp.getNameAsString();
             return name.startsWith("sa.com.cloudsolutions.antikythera.") || name.contains("$");
@@ -624,13 +625,6 @@ public class UnitTestGenerator extends TestGenerator {
 
     void addDependencies() {
         for (ImportDeclaration imp : TestGenerator.getImports()) {
-            // Skip internal antikythera evaluator/generator classes — they are not available at
-            // test-compile time and should never appear in generated tests.
-            // Also skip private/anonymous JDK implementation classes (e.g. ImmutableCollections$ListN).
-            String name = imp.getNameAsString();
-            if (name.startsWith("sa.com.cloudsolutions.antikythera.") || name.contains("$")) {
-                continue;
-            }
             gen.addImport(imp);
         }
     }
@@ -1967,17 +1961,8 @@ public class UnitTestGenerator extends TestGenerator {
         if (removedDuplicates) {
             logger.info("Removed duplicate test methods from {}", filePath);
         }
-        pruneUnusedImports();
         String content = gen.toString();
         Antikythera.getInstance().writeFile(filePath, content);
-    }
-
-    /**
-     * Removes imports whose simple class name does not appear in the non-import
-     * portion of the generated file. Wildcard and static imports are always kept.
-     */
-    private void pruneUnusedImports() {
-
     }
 
     static void replaceInitializer(MethodDeclaration method, String name, Expression initialization) {
