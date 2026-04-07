@@ -82,7 +82,7 @@ public class JunitAsserter extends Asserter {
          * creates Byte Buddy proxy instances that confuse Spring's BeanWrapper introspection. Real
          * instances work fine. Suppress the false-positive assertThrows.
          */
-        if (exceptionClass.contains("FatalBeanException") || exceptionClass.contains("org.springframework.beans.BeansException")) {
+        if (exceptionClass.contains("FatalBeanException") || exceptionClass.startsWith("org.springframework.beans.")) {
             return assertDoesNotThrow(invocation.replace(';', ' '));
         }
         assertThrows.addArgument(exceptionClass + ".class");

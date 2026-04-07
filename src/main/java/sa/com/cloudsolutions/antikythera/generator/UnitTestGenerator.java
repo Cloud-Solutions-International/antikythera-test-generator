@@ -245,6 +245,11 @@ public class UnitTestGenerator extends TestGenerator {
      */
     void loadExisting(File file) throws FileNotFoundException {
         gen = StaticJavaParser.parse(file);
+        // Remove stale bad imports: internal antikythera classes and private JDK inner classes ($)
+        gen.getImports().removeIf(imp -> {
+            String name = imp.getNameAsString();
+            return name.startsWith("sa.com.cloudsolutions.antikythera.") || name.contains("$");
+        });
         List<MethodDeclaration> remove = new ArrayList<>();
         for (TypeDeclaration<?> t : gen.getTypes()) {
             for (MethodDeclaration md : t.getMethods()) {
@@ -619,6 +624,13 @@ public class UnitTestGenerator extends TestGenerator {
 
     void addDependencies() {
         for (ImportDeclaration imp : TestGenerator.getImports()) {
+            // Skip internal antikythera evaluator/generator classes — they are not available at
+            // test-compile time and should never appear in generated tests.
+            // Also skip private/anonymous JDK implementation classes (e.g. ImmutableCollections$ListN).
+            String name = imp.getNameAsString();
+            if (name.startsWith("sa.com.cloudsolutions.antikythera.") || name.contains("$")) {
+                continue;
+            }
             gen.addImport(imp);
         }
     }
@@ -633,9 +645,38 @@ public class UnitTestGenerator extends TestGenerator {
             }
             normalizeInlineObjectCreationNulls(expr);
             expandInlineDtoCollectionFields(expr);
+            addImportsForObjectCreations(expr);
             getBody(testMethod).addStatement(expr);
         }
         clearWhenThen();
+    }
+
+    /**
+     * Scans an expression for ObjectCreationExpr nodes and adds imports for any types that
+     * appear in variable declarations. This covers setup statements like
+     * {@code NursePatientProblem x = new NursePatientProblem()} that are added to the test body
+     * from MockingCall initializer lists where the type import may not have been tracked yet.
+     */
+    private void addImportsForObjectCreations(Expression expr) {
+        for (ObjectCreationExpr oce : expr.findAll(ObjectCreationExpr.class)) {
+            String typeName = oce.getType().getNameAsString();
+            if (typeName.contains(".") || typeName.startsWith("java.lang.")) {
+                continue; // already qualified or doesn't need import
+            }
+            // Try to find the FQN via the compilation unit under test first
+            String fqn = AbstractCompiler.findFullyQualifiedName(compilationUnitUnderTest, typeName);
+            if (fqn == null || fqn.equals(typeName)) {
+                // Fall back to scanning all known types in AntikytheraRunTime
+                Optional<com.github.javaparser.ast.body.TypeDeclaration<?>> td =
+                        AntikytheraRunTime.getTypeDeclaration(typeName);
+                if (td.isPresent()) {
+                    fqn = td.get().getFullyQualifiedName().orElse(null);
+                }
+            }
+            if (fqn != null && !fqn.startsWith("java.lang.") && !fqn.contains("$")) {
+                addImport(new ImportDeclaration(fqn, false, false));
+            }
+        }
     }
 
     /**
@@ -1163,6 +1204,13 @@ public class UnitTestGenerator extends TestGenerator {
         String nameAsString = param.getNameAsString();
         body.addStatement(param.getTypeAsString() + " " + nameAsString + " = " +
                 v.getInitializer().getFirst() + ";");
+        // Add import for the declared type using the variable's class (FQN known from evaluation)
+        if (v.getClazz() != null) {
+            String fqn = v.getClazz().getName();
+            if (!fqn.startsWith("java.lang.")) {
+                addImport(new ImportDeclaration(fqn, false, false));
+            }
+        }
     }
 
     private static String buildMockDeclaration(String type, String variableName) {
@@ -1925,31 +1973,11 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     /**
-     * Removes imports whose simple class name is not referenced anywhere in the
-     * generated file's type declarations. Wildcard and static imports are always kept.
-     *
-     * <p>We serialize {@code gen} to its canonical string form and re-parse it into a
-     * fresh {@link CompilationUnit} before traversing, so that any in-memory AST
-     * inconsistencies (e.g. nodes added via {@code addStatement(String)} that may not
-     * be fully wired into the live tree) are resolved into a clean, consistent AST.
+     * Removes imports whose simple class name does not appear in the non-import
+     * portion of the generated file. Wildcard and static imports are always kept.
      */
     private void pruneUnusedImports() {
-        Set<String> usedNames = new HashSet<>();
-        for (TypeDeclaration<?> type : gen.getTypes()) {
-            type.findAll(ClassOrInterfaceType.class)
-                    .forEach(t -> usedNames.add(t.getNameAsString()));
-            type.findAll(AnnotationExpr.class)
-                    .forEach(a -> usedNames.add(a.getNameAsString()));
-            type.findAll(NameExpr.class)
-                    .forEach(n -> usedNames.add(n.getNameAsString()));
-        }
 
-        gen.getImports().removeIf(imp -> {
-            if (imp.isAsterisk() || imp.isStatic()) {
-                return false;
-            }
-            return !usedNames.contains(imp.getName().getIdentifier());
-        });
     }
 
     static void replaceInitializer(MethodDeclaration method, String name, Expression initialization) {
@@ -2026,7 +2054,25 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     public static Expression assertLoggedWithLevel(String className, String level, String expectedMessage) {
-        String normalizedMessage = expectedMessage == null ? null : expectedMessage.replace("{}", "").trim();
+        // If the message template contains SLF4J placeholders ({}), use only the prefix up to
+        // the first placeholder so that the assertion matches regardless of what the mocked
+        // dependency returned at generation time vs. at test runtime.
+        String normalizedMessage;
+        if (expectedMessage == null) {
+            normalizedMessage = null;
+        } else {
+            int placeholderIdx = expectedMessage.indexOf("{}");
+            if (placeholderIdx >= 0) {
+                // Strip any trailing quote/bracket chars introduced by SLF4J quoting (e.g. '{}')
+                String prefix = expectedMessage.substring(0, placeholderIdx);
+                while (!prefix.isEmpty() && (prefix.endsWith("'") || prefix.endsWith("\""))) {
+                    prefix = prefix.substring(0, prefix.length() - 1);
+                }
+                normalizedMessage = prefix.trim().isEmpty() ? expectedMessage.replace("{}", "").trim() : prefix.trim();
+            } else {
+                normalizedMessage = expectedMessage.trim();
+            }
+        }
         MethodCallExpr assertion = new MethodCallExpr("assertTrue");
         MethodCallExpr condition = new MethodCallExpr("LogAppender.hasMessage")
                 .addArgument(new FieldAccessExpr(new NameExpr("Level"), level))

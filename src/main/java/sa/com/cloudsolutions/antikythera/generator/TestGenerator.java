@@ -139,6 +139,9 @@ public abstract class TestGenerator implements ITestGenerator {
 
         tm.setBody(body);
         tm.addAnnotation("Test");
+        // Declare 'throws Exception' so that Mockito.when() stubs that invoke methods with
+        // checked exception signatures (e.g. ObjectMapper.writeValueAsString) compile without error.
+        tm.addThrownException(new com.github.javaparser.ast.type.ClassOrInterfaceType(null, "Exception"));
         return tm;
     }
 
