@@ -139,12 +139,7 @@ public class Antikythera {
 
             pathToCopy = Paths.get(outputPath, antikytheraPkgPath, "constants");
             Files.createDirectories(pathToCopy);
-            /*
-             * Todo resurrect the Constants class that as in the
-             * com.sa.com.cloudsolutions.antikythera.constants package
-             * and move it to the resources
-             * copyFolder(Paths.get(antikytheraPkgPath, "constants"), pathToCopy);
-             */
+
             pathToCopy = Paths.get(outputPath, antikytheraPkgPath, "configurations");
             Files.createDirectories(pathToCopy);
         } else {
@@ -257,7 +252,7 @@ public class Antikythera {
             for (String path : targets) {
                 try {
                     processService(path, new String[] { path });
-                } catch (Throwable t) {
+                } catch (Exception t) {
                     logger.warn("Fallback: skipped unit target {} — {}", path, t.toString());
                     logger.debug("Fallback skip stack trace for {}", path, t);
                 }

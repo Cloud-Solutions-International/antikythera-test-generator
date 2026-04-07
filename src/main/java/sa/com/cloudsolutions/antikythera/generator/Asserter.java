@@ -54,7 +54,7 @@ public abstract class Asserter {
                         continue;
                     }
 
-                    String getter = findGetter(value, fieldName, type);
+                    String getter = findGetter(fieldName, type);
                     if (getter != null) {
                         body.addStatement(fieldAssertion(getter, value));
                         i++;
@@ -84,7 +84,7 @@ public abstract class Asserter {
         return collection.isEmpty() && fieldVariable.getInitializer().isEmpty();
     }
 
-    private String findGetter(Variable value, String fieldName, TypeDeclaration<?> type) {
+    private String findGetter(String fieldName, TypeDeclaration<?> type) {
 
         /*
          * For `boolean` (primitive) fields that start with `is` immediately followed by a

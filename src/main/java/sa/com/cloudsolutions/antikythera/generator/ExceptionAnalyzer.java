@@ -12,7 +12,6 @@ import sa.com.cloudsolutions.antikythera.evaluator.LoopContext;
 import sa.com.cloudsolutions.antikythera.evaluator.Variable;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -295,43 +294,6 @@ public class ExceptionAnalyzer {
             || exprStr.contains("Collections.emptySet")
             || exprStr.contains("Collections.singletonList")
             || exprStr.contains("Arrays.asList");
-    }
-
-    /**
-     * Suggest fixes to test arguments to make them trigger the exception.
-     * This is used when we detect that current arguments won't trigger the exception.
-     * 
-     * @param ctx Exception context
-     * @param currentArgs Current test arguments
-     * @return Modified arguments that should trigger the exception, or null if can't fix
-     */
-    public Map<String, Expression> fixArgumentsForException(
-            ExceptionContext ctx, 
-            Map<String, Expression> currentArgs) {
-        
-        if (ctx == null || !ctx.isInsideLoop()) {
-            return null; // Can only fix loop-related issues for now
-        }
-
-        LoopContext loopCtx = ctx.getLoopContext();
-        if (loopCtx == null) {
-            return null;
-        }
-
-        Variable collectionVar = loopCtx.getCollectionVariable();
-        String collectionParamName = findCollectionParameterName(collectionVar, currentArgs);
-        
-        if (collectionParamName == null) {
-            logger.warn("Cannot fix arguments - unable to identify collection parameter");
-            return null;
-        }
-
-        // For now, we just identify the problem - actual fixing will be done
-        // in Phase 3 when we integrate with test generation
-        logger.info("Collection parameter '{}' needs non-empty invalid data to trigger exception",
-                   collectionParamName);
-
-        return null; // Phase 3 will implement actual fixing
     }
 
     /**
