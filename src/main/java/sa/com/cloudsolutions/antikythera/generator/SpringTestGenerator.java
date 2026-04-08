@@ -34,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sa.com.cloudsolutions.antikythera.configuration.Settings;
 import sa.com.cloudsolutions.antikythera.parser.ImportWrapper;
+import sa.com.cloudsolutions.antikythera.parser.ProcessingReport;
 import sa.com.cloudsolutions.antikythera.parser.RestControllerParser;
 
 import java.util.List;
@@ -99,6 +100,7 @@ public class SpringTestGenerator extends  TestGenerator {
 
         if (cd instanceof MethodDeclaration md) {
             RestControllerParser.getStats().setTests(RestControllerParser.getStats().getTests() + 1);
+            ProcessingReport.getInstance().incrementCurrentMethodTests();
             for (AnnotationExpr annotation : md.getAnnotations()) {
                 if (annotation.getNameAsString().equals("GetMapping")) {
                     buildGetMethodTests(annotation, controllerResponse);

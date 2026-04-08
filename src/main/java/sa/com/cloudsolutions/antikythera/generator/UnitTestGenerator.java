@@ -62,6 +62,7 @@ import sa.com.cloudsolutions.antikythera.exception.AntikytheraException;
 import sa.com.cloudsolutions.antikythera.parser.AbstractCompiler;
 import sa.com.cloudsolutions.antikythera.parser.Callable;
 import sa.com.cloudsolutions.antikythera.parser.ImportWrapper;
+import sa.com.cloudsolutions.antikythera.parser.ProcessingReport;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -364,6 +365,7 @@ public class UnitTestGenerator extends TestGenerator {
     @Override
     public void createTests(CallableDeclaration<?> md, MethodResponse response) {
         methodUnderTest = md;
+        ProcessingReport.getInstance().incrementCurrentMethodTests();
         testMethod = buildTestMethod(md);
         gen.getType(0).addMember(testMethod);
         if (md instanceof MethodDeclaration) {

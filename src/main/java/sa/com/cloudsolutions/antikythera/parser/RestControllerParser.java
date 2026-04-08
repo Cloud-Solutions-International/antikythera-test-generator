@@ -27,6 +27,7 @@ import sa.com.cloudsolutions.antikythera.evaluator.SpringEvaluator;
 import sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
 import sa.com.cloudsolutions.antikythera.generator.Antikythera;
 import sa.com.cloudsolutions.antikythera.generator.SpringTestGenerator;
+import sa.com.cloudsolutions.antikythera.parser.ProcessingReport;
 
 public class RestControllerParser extends DepsolvingParser {
     /**
@@ -67,6 +68,7 @@ public class RestControllerParser extends DepsolvingParser {
     private void processRestController(PackageDeclaration pd) throws IOException {
 
         TypeDeclaration<?> type = AbstractCompiler.getPublicType(cu);
+        ProcessingReport.getInstance().beginClass(type.getFullyQualifiedName().orElseThrow());
 
         evaluator = EvaluatorFactory.create(type.getFullyQualifiedName().orElseThrow(), SpringEvaluator.class);
         evaluator.setOnTest(true);
@@ -117,8 +119,13 @@ public class RestControllerParser extends DepsolvingParser {
         @Override
         public void visit(ConstructorDeclaration cd, Void arg) {
             super.visit(cd, arg);
-            if (generateConstructorTests && !cd.isPrivate()) {
-                callableVisitor(cd);
+            if (generateConstructorTests) {
+                if (!cd.isPrivate()) {
+                    ProcessingReport.getInstance().beginMethod(cd);
+                    callableVisitor(cd);
+                } else {
+                    ProcessingReport.getInstance().recordMethodSkipped(cd, "private constructor");
+                }
             }
         }
 
@@ -136,24 +143,28 @@ public class RestControllerParser extends DepsolvingParser {
             super.visit(md, arg);
 
             if (checkEligible(md)) {
+                ProcessingReport.getInstance().beginMethod(md);
                 callableVisitor(md);
             }
         }
 
         private boolean checkEligible(MethodDeclaration md) {
             if (md.getAnnotationByName("ExceptionHandler").isPresent()) {
+                ProcessingReport.getInstance().recordMethodSkipped(md, "@ExceptionHandler methods are not test targets");
                 return false;
             }
             if (md.isPublic()) {
                 Optional<String> ctrl  = Settings.getProperty("controllers", String.class);
                 if(ctrl.isPresent()) {
                     String[] crs = ctrl.get().split("#");
-                    if (crs.length > 1) {
-                        return md.getNameAsString().equals(crs[crs.length - 1]);
+                    if (crs.length > 1 && !md.getNameAsString().equals(crs[crs.length - 1])) {
+                        ProcessingReport.getInstance().recordMethodSkipped(md, "filtered out by method name selector");
+                        return false;
                     }
                 }
                 return true;
             }
+            ProcessingReport.getInstance().recordMethodSkipped(md, "not public");
             return false;
         }
     }

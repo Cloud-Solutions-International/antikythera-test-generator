@@ -16,6 +16,7 @@ import sa.com.cloudsolutions.antikythera.exception.AntikytheraException;
 import sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
 import sa.com.cloudsolutions.antikythera.parser.AbstractCompiler;
 import sa.com.cloudsolutions.antikythera.parser.MavenHelper;
+import sa.com.cloudsolutions.antikythera.parser.ProcessingReport;
 import sa.com.cloudsolutions.antikythera.parser.RestControllerParser;
 import sa.com.cloudsolutions.antikythera.parser.ServicesParser;
 import sa.com.cloudsolutions.antikythera.parser.Stats;
@@ -101,6 +102,7 @@ public class Antikythera {
         if (args.length > 0 && !args[0].isBlank()) {
             Settings.loadConfigMap(new File(args[0].trim()));
         }
+        ProcessingReport.getInstance().reset();
         Antikythera antk = Antikythera.getInstance();
         if (isFallbackMode()) {
             logger.info("No explicit controllers or services configured — using full-project fallback discovery for unit tests");
@@ -114,6 +116,11 @@ public class Antikythera {
         logger.info("Generated {} tests", stats.getTests());
 
         antk.generateUnitTests();
+
+        String reportJson = ProcessingReport.getInstance().toJson();
+        String reportPath = resolveProcessingReportPath();
+        antk.writeFile(reportPath, reportJson);
+        logger.info("Processing report written to {}", reportPath);
     }
 
     private void copyBaseFiles(String outputPath) throws IOException, XmlPullParserException {
@@ -178,11 +185,23 @@ public class Antikythera {
     public void writeFile(String filePath, String content) throws IOException {
         File file = new File(filePath);
         File parentDir = file.getParentFile();
-        Files.createDirectories(parentDir.toPath());
+        if (parentDir != null) {
+            Files.createDirectories(parentDir.toPath());
+        }
         try (FileWriter writer = new FileWriter(file)) {
             writer.write(content);
             writer.flush();
         }
+    }
+
+    private static String resolveProcessingReportPath() {
+        return Settings.getProperty(Settings.PROCESSING_REPORT_PATH, String.class)
+                .filter(path -> !path.isBlank())
+                .map(Paths::get)
+                .map(Path::toAbsolutePath)
+                .map(Path::normalize)
+                .map(Path::toString)
+                .orElseGet(() -> Paths.get(System.getProperty("user.dir"), "processing-report.json").toString());
     }
 
     public void preProcess() throws IOException, XmlPullParserException {
@@ -253,6 +272,7 @@ public class Antikythera {
                 try {
                     processService(path, new String[] { path });
                 } catch (Exception t) {
+                    ProcessingReport.getInstance().recordClassFailed(path, t.toString());
                     logger.warn("Fallback: skipped unit target {} — {}", path, t.toString());
                     logger.debug("Fallback skip stack trace for {}", path, t);
                 }
@@ -294,6 +314,7 @@ public class Antikythera {
             }
         } catch (IOException e) {
             logger.error("Failed to process service file {}", file, e);
+            ProcessingReport.getInstance().recordClassFailed(file.toString(), e.getMessage());
         }
     }
 
@@ -309,12 +330,16 @@ public class Antikythera {
                 logger.debug(
                         "Skipping {} - class not found in compilation unit cache. File package ({}) may not match directory structure.",
                         className, packageName.orElse("default package"));
+                ProcessingReport.getInstance().recordClassSkipped(className,
+                        "class not found in compilation unit cache (package/directory mismatch)");
                 return null;
             }
 
             return className;
         } catch (Exception e) {
             logger.debug("Could not parse file {} to determine class name", file, e);
+            ProcessingReport.getInstance().recordClassSkipped(file.toString(),
+                    "could not parse file: " + e.getMessage());
             return null;
         }
     }

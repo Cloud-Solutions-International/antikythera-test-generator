@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sa.com.cloudsolutions.antikythera.configuration.Settings;
 import sa.com.cloudsolutions.antikythera.evaluator.AntikytheraRunTime;
+import sa.com.cloudsolutions.antikythera.parser.ProcessingReport;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -55,6 +56,7 @@ public final class UnitTestDiscovery {
                 SkipReason reason = r.reason();
                 skipCounts.merge(reason, 1, Integer::sum);
                 logger.debug("Fallback SKIP {} — {} ({})", fqn, reason, r.explanation());
+                ProcessingReport.getInstance().recordClassSkipped(fqn, reason.name() + ": " + r.explanation());
             }
         }
 

@@ -19,6 +19,7 @@ import sa.com.cloudsolutions.antikythera.evaluator.SpringEvaluator;
 import sa.com.cloudsolutions.antikythera.exception.AntikytheraException;
 import sa.com.cloudsolutions.antikythera.generator.Factory;
 import sa.com.cloudsolutions.antikythera.generator.UnitTestGenerator;
+import sa.com.cloudsolutions.antikythera.parser.ProcessingReport;
 
 import java.io.IOException;
 import java.util.Set;
@@ -48,6 +49,7 @@ public class ServicesParser extends DepsolvingParser {
 
     @Override
     public void start() {
+        ProcessingReport.getInstance().beginClass(cls);
 
         for(TypeDeclaration<?> decl : cu.getTypes()) {
             DepSolver solver = DepSolver.createSolver();
@@ -58,6 +60,7 @@ public class ServicesParser extends DepsolvingParser {
                 }
                 else {
                     logger.debug("Skipping private method {}", md.getNameAsString());
+                    ProcessingReport.getInstance().recordMethodSkipped(md, "private method");
                 }
             });
             if (generateConstructorTests) {
@@ -65,6 +68,8 @@ public class ServicesParser extends DepsolvingParser {
                     if (!cd.isPrivate() || testPrivates) {
                         Graph.createGraphNode(cd);
                         methods.add(cd);
+                    } else {
+                        ProcessingReport.getInstance().recordMethodSkipped(cd, "private constructor");
                     }
                 });
             }
@@ -75,6 +80,7 @@ public class ServicesParser extends DepsolvingParser {
 
     @Override
     public void start(String method) {
+        ProcessingReport.getInstance().beginClass(cls);
         for(TypeDeclaration<?> decl : cu.getTypes()) {
             DepSolver solver = DepSolver.createSolver();
             decl.findAll(MethodDeclaration.class).forEach(md -> {
@@ -99,6 +105,7 @@ public class ServicesParser extends DepsolvingParser {
     private void eval() {
         for (CallableDeclaration<?> md : methods) {
             stats.methods++;
+            ProcessingReport.getInstance().beginMethod(md);
             evaluateCallable(md, new DummyArgumentGenerator());
         }
     }
