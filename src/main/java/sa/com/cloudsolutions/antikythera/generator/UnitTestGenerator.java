@@ -49,6 +49,7 @@ import sa.com.cloudsolutions.antikythera.depsolver.DepSolver;
 import sa.com.cloudsolutions.antikythera.depsolver.Graph;
 import sa.com.cloudsolutions.antikythera.evaluator.AntikytheraRunTime;
 import sa.com.cloudsolutions.antikythera.evaluator.ArgumentGenerator;
+import sa.com.cloudsolutions.antikythera.evaluator.BranchingTrace;
 import sa.com.cloudsolutions.antikythera.evaluator.Evaluator;
 import sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext;
 import sa.com.cloudsolutions.antikythera.evaluator.Precondition;
@@ -400,6 +401,10 @@ public class UnitTestGenerator extends TestGenerator {
         } else {
             handleExceptionResponse(response, invocation);
         }
+        BranchingTrace.record("generated:"
+                + md.getNameAsString()
+                + "|test=" + testMethod.getNameAsString()
+                + "|fingerprint=" + fingerprintFor(testMethod));
     }
 
     /**

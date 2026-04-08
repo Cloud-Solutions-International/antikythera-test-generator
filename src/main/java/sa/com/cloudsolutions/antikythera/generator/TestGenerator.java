@@ -197,9 +197,7 @@ public abstract class TestGenerator implements ITestGenerator {
             
             for (MethodDeclaration method : type.getMethods()) {
                 if (method.getAnnotationByName("Test").isPresent()) {
-                    MethodDeclaration m = method.clone();
-                    m.setName("DUMMY");
-                    String fingerprint = normalizeFingerprint(m.toString());
+                    String fingerprint = fingerprintFor(method);
                     
                     if (methodFingerprints.contains(fingerprint)) {
                         methodsToRemove.add(method);
@@ -232,6 +230,12 @@ public abstract class TestGenerator implements ITestGenerator {
                 .replace("new ArrayList()", "new ArrayList<>()")
                 .replace("new HashMap()", "new HashMap<>()")
                 .replace("new HashSet()", "new HashSet<>()");
+    }
+
+    protected String fingerprintFor(MethodDeclaration method) {
+        MethodDeclaration copy = method.clone();
+        copy.setName("DUMMY");
+        return normalizeFingerprint(copy.toString());
     }
 
     @SuppressWarnings("java:S1130") // this exception will be thrown by subclasses hence the need to declare here

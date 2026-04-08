@@ -500,6 +500,50 @@ class TestTruthTable {
     }
 
     @Test
+    void testStringUtilsIsEmptyUsesSentinelValueForFalseRows() {
+        TruthTable tt = new TruthTable("StringUtils.isEmpty(a)");
+        tt.generateTruthTable();
+
+        List<Map<Expression, Object>> falseRows = tt.findValuesForCondition(false);
+        assertFalse(falseRows.isEmpty());
+
+        Map<Expression, Object> firstFalseRow = falseRows.getFirst();
+        Expression methodCall = firstFalseRow.keySet().stream()
+                .filter(Expression::isMethodCallExpr)
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("T", firstFalseRow.get(methodCall));
+        assertTrue(TruthTable.isTrue(firstFalseRow.get(methodCall)),
+                "The raw sentinel is a truthy string token");
+
+        List<Map<Expression, Object>> trueRows = tt.findValuesForCondition(true);
+        assertTrue(trueRows.stream().noneMatch(row -> "T".equals(row.get(methodCall))),
+                "The sentinel should still map to false when StringUtils.isEmpty(...) is evaluated");
+    }
+
+    @Test
+    void testMultipleConstraintsAreAllApplied() {
+        TruthTable tt = new TruthTable("a >= 0");
+        NameExpr variable = new NameExpr("a");
+
+        tt.addConstraint(variable,
+                new BinaryExpr(variable, new IntegerLiteralExpr("5"), BinaryExpr.Operator.GREATER_EQUALS));
+        tt.addConstraint(variable,
+                new BinaryExpr(variable, new IntegerLiteralExpr("6"), BinaryExpr.Operator.LESS_EQUALS));
+
+        tt.generateTruthTable();
+
+        List<Map<Expression, Object>> trueRows = tt.findValuesForCondition(true);
+        assertFalse(trueRows.isEmpty());
+        for (Map<Expression, Object> row : trueRows) {
+            int value = (int) row.get(variable);
+            assertTrue(value >= 5, "Expected lower-bound constraint to hold");
+            assertTrue(value <= 6, "Expected upper-bound constraint to hold");
+        }
+    }
+
+    @Test
     void testMultipleConstraints() {
         String condition = "a >= b && b >= c";
         TruthTable tt = new TruthTable(condition);
@@ -540,9 +584,11 @@ class TestTruthTable {
 
         assertFalse(v.isEmpty());
         for (Map<Expression, Object> row : v) {
+            int aValue = (int) row.get(new NameExpr("a"));
             int bValue = (int) row.get(new NameExpr("b"));
+            assertTrue(aValue >= 5 && aValue <= 10, "a should be between 5 and 10");
             assertTrue(bValue >= 5 && bValue <= 10, "b should be between 1 and 3");
-            assertTrue((int) row.get(new NameExpr("a")) >= bValue, "a should be greater than or equal to b");
+            assertTrue(aValue >= bValue, "a should be greater than or equal to b");
             assertTrue(bValue >= (int) row.get(new NameExpr("c")), "b should be greater than or equal to c");
         }
     }
