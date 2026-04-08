@@ -211,13 +211,13 @@ final class MockFieldSupport {
     private void addListCollectionSetterStub(BlockStmt body, String receiverName, String setterName) {
         TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
         TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
-        body.addStatement(String.format("%s.%s(new ArrayList());", receiverName, setterName));
+        body.addStatement(String.format("%s.%s(new java.util.ArrayList<>());", receiverName, setterName));
     }
 
     private void addMapSetterStub(BlockStmt body, String receiverName, String setterName) {
         TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_MAP, false, false));
         TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_HASH_MAP, false, false));
-        body.addStatement(String.format("%s.%s(new HashMap());", receiverName, setterName));
+        body.addStatement(String.format("%s.%s(new java.util.HashMap<>());", receiverName, setterName));
     }
 
     private void addSetterCallWithCoercedInitializer(BlockStmt body, String receiverName, String setterName,
@@ -248,6 +248,11 @@ final class MockFieldSupport {
         }
         Variable fieldVar = eval.getField(name);
         Object value = fieldVar.getValue();
+        if (!fieldVar.getInitializer().isEmpty()) {
+            Expression fieldInitializer = createFieldInitializer(field, fieldVar);
+            addSetterCallWithCoercedInitializer(body, nameAsString, setterName, ownerType, fieldInitializer);
+            return;
+        }
         if (value instanceof Map || (value == null && TypeInspector.isMapType(fieldVar.getType()))) {
             addMapSetterStub(body, nameAsString, setterName);
             return;

@@ -139,12 +139,15 @@ public class UnitTestGenerator extends TestGenerator {
         clearImports();
         this.mockFieldSupport = new MockFieldSupport(this, Objects.requireNonNull(generatorSeams));
         String packageDecl = cu.getPackageDeclaration().map(PackageDeclaration::getNameAsString).orElse("");
-        String basePath = Settings.getProperty(Settings.BASE_PATH, String.class).orElseThrow();
         String className = AbstractCompiler.getPublicType(cu).getNameAsString() + TEST_NAME_SUFFIX;
 
-        // Navigate from .../src/main/java → .../src/test/java using the Path API
-        // instead of fragile string replacement.
-        Path testRoot = Paths.get(basePath).getParent().getParent().resolve(TestGenerationConstants.MAVEN_TEST_JAVA_UNDER_SRC);
+        Path testRoot = Settings.getProperty(Settings.OUTPUT_PATH, String.class)
+                .map(Paths::get)
+                .orElseGet(() -> {
+                    String basePath = Settings.getProperty(Settings.BASE_PATH, String.class).orElseThrow();
+                    return Paths.get(basePath).getParent().getParent()
+                            .resolve(TestGenerationConstants.MAVEN_TEST_JAVA_UNDER_SRC);
+                });
         filePath = testRoot.resolve(packageDecl.replace(".", File.separator))
                 .resolve(className + ".java")
                 .toString();
@@ -1411,7 +1414,16 @@ public class UnitTestGenerator extends TestGenerator {
     private void applyPreconditionWithMockito(Expression expr) {
         BlockStmt body = getBody(testMethod);
         if (expr.isMethodCallExpr()) {
-            MethodCallExpr mce = normalizeSetterPrecondition(expr.asMethodCallExpr().clone());
+            MethodCallExpr raw = expr.asMethodCallExpr().clone();
+            if (isCollectionMutationPrecondition(raw)) {
+                raw.getScope().ifPresent(scope -> {
+                    if (!variables.getOrDefault(scope.toString(), false)) {
+                        body.addStatement(raw);
+                    }
+                });
+                return;
+            }
+            MethodCallExpr mce = normalizeSetterPrecondition(raw);
             if (mce == null) {
                 return;
             }
@@ -1427,7 +1439,9 @@ public class UnitTestGenerator extends TestGenerator {
                         ));
                     }
                     else {
-                        body.addStatement(mce);
+                        if (!containsStatement(body, mce)) {
+                            body.addStatement(mce);
+                        }
                     }
                 }
             });
@@ -1439,6 +1453,19 @@ public class UnitTestGenerator extends TestGenerator {
                 replaceInitializer(testMethod, nameExpr.getNameAsString(), value);
             }
         }
+    }
+
+    private boolean containsStatement(BlockStmt body, Expression expr) {
+        return body.getStatements().stream()
+                .filter(Statement::isExpressionStmt)
+                .map(stmt -> stmt.asExpressionStmt().getExpression())
+                .anyMatch(existing -> existing.equals(expr));
+    }
+
+    private boolean isCollectionMutationPrecondition(MethodCallExpr mce) {
+        String name = mce.getNameAsString();
+        return (name.equals("add") && mce.getArguments().size() == 1)
+                || (name.equals("put") && mce.getArguments().size() == 2);
     }
 
     private MethodCallExpr normalizeSetterPrecondition(MethodCallExpr mce) {
@@ -1958,11 +1985,7 @@ public class UnitTestGenerator extends TestGenerator {
     @Override
     public void save() throws IOException {
         DepSolver.sortClass(testClass);
-        // Remove duplicate tests before saving
-        boolean removedDuplicates = removeDuplicateTests();
-        if (removedDuplicates) {
-            logger.info("Removed duplicate test methods from {}", filePath);
-        }
+        removeDuplicateTests();
         String content = gen.toString();
         Antikythera.getInstance().writeFile(filePath, content);
     }
