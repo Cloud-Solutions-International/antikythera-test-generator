@@ -52,15 +52,23 @@ class BranchingCombinationFixtureTest {
                 "Expected collaborator stubbing for diagnosis-type path");
         assertTrue(genSource.contains("Mockito.when(repository.findActive("),
                 "Expected collaborator stubbing for empty-diagnosis path");
+        assertTrue(genSource.contains("branchingCombinations = new BranchingCombinations(repository, directory);"),
+                "Expected constructor-injected fixture to be instantiated with discovered mocks");
         assertFalse(genSource.contains("assertThrows(java.lang.NullPointerException.class"),
                 "Collaborator-backed fixture generation should no longer collapse into plain NPE tests");
     }
 
     @Test
     void collaboratorFixturesRecordPreconditionsAndGeneratedFingerprints() throws ReflectiveOperationException {
-        runGenerator(FIXTURE_CLASS);
+        String genSource = runGenerator(FIXTURE_CLASS);
 
         List<String> trace = BranchingTrace.snapshot();
+        System.out.println("TRACE_START");
+        System.out.println(String.join(System.lineSeparator(), trace));
+        System.out.println("TRACE_END");
+        System.out.println("GEN_START");
+        System.out.println(genSource);
+        System.out.println("GEN_END");
         assertTrue(trace.stream().anyMatch(event -> event.startsWith("preconditions:sequentialProblemStrings")),
                 "Expected precondition trace entries for sequentialProblemStrings");
         assertTrue(trace.stream().anyMatch(event -> event.startsWith("preconditions:deletedByLookup")),

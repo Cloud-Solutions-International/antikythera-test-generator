@@ -1420,6 +1420,12 @@ public class UnitTestGenerator extends TestGenerator {
         BlockStmt body = getBody(testMethod);
         if (expr.isMethodCallExpr()) {
             MethodCallExpr raw = expr.asMethodCallExpr().clone();
+            if (isMockitoWhenThenPrecondition(raw)) {
+                if (!containsStatement(body, raw)) {
+                    body.addStatement(raw);
+                }
+                return;
+            }
             if (isCollectionMutationPrecondition(raw)) {
                 raw.getScope().ifPresent(scope -> {
                     if (!variables.getOrDefault(scope.toString(), false)) {
@@ -1471,6 +1477,22 @@ public class UnitTestGenerator extends TestGenerator {
         String name = mce.getNameAsString();
         return (name.equals("add") && mce.getArguments().size() == 1)
                 || (name.equals("put") && mce.getArguments().size() == 2);
+    }
+
+    private boolean isMockitoWhenThenPrecondition(MethodCallExpr mce) {
+        if (!mce.getNameAsString().startsWith("then")) {
+            return false;
+        }
+        return mce.getScope()
+                .filter(Expression::isMethodCallExpr)
+                .map(Expression::asMethodCallExpr)
+                .filter(scopeCall -> scopeCall.getNameAsString().equals("when"))
+                .flatMap(MethodCallExpr::getScope)
+                .filter(Expression::isNameExpr)
+                .map(Expression::asNameExpr)
+                .map(NameExpr::getNameAsString)
+                .filter("Mockito"::equals)
+                .isPresent();
     }
 
     private MethodCallExpr normalizeSetterPrecondition(MethodCallExpr mce) {
@@ -1795,14 +1817,103 @@ public class UnitTestGenerator extends TestGenerator {
         return mockedFieldNames;
     }
 
+    private Map<String, Type> collectMockedFieldsByNameFromGeneratedTestClass() {
+        Map<String, Type> mockedFields = new HashMap<>();
+        for (TypeDeclaration<?> testType : gen.getTypes()) {
+            for (FieldDeclaration field : testType.getFields()) {
+                boolean hasMockAnnotation = field.getAnnotations().stream()
+                        .anyMatch(ann -> ann.getNameAsString().equals(TestGenerationConstants.MOCK_SIMPLE_NAME)
+                                || ann.getNameAsString().equals(TestGenerationConstants.MOCK_BEAN_SIMPLE_NAME));
+                if (hasMockAnnotation) {
+                    mockedFields.put(field.getVariable(0).getNameAsString(), field.getElementType());
+                }
+            }
+        }
+        return mockedFields;
+    }
+
+    private Optional<ConstructorDeclaration> findPreferredConstructor(ClassOrInterfaceDeclaration bean) {
+        if (bean.getConstructors().isEmpty()) {
+            return Optional.empty();
+        }
+        return bean.getConstructors().stream()
+                .sorted((a, b) -> {
+                    boolean aAutowired = a.getAnnotationByName("Autowired").isPresent();
+                    boolean bAutowired = b.getAnnotationByName("Autowired").isPresent();
+                    if (aAutowired != bAutowired) {
+                        return aAutowired ? -1 : 1;
+                    }
+                    return Integer.compare(b.getParameters().size(), a.getParameters().size());
+                })
+                .findFirst();
+    }
+
+    private Optional<String> findMockFieldForConstructorParameter(Parameter parameter, Map<String, Type> mockedFieldsByName) {
+        String paramName = parameter.getNameAsString();
+        if (mockedFieldsByName.containsKey(paramName)) {
+            return Optional.of(paramName);
+        }
+
+        List<String> typeMatches = mockedFieldsByName.entrySet().stream()
+                .filter(entry -> entry.getValue().asString().equals(parameter.getType().asString()))
+                .map(Map.Entry::getKey)
+                .toList();
+        if (typeMatches.size() == 1) {
+            return Optional.of(typeMatches.getFirst());
+        }
+        return Optional.empty();
+    }
+
+    private Expression constructorArgumentExpression(Parameter parameter, Map<String, Type> mockedFieldsByName) {
+        Optional<String> mockField = findMockFieldForConstructorParameter(parameter, mockedFieldsByName);
+        if (mockField.isPresent()) {
+            return new NameExpr(mockField.orElseThrow());
+        }
+        Optional<String> literal = valueFieldInitializerLiteral(parameter.getType());
+        if (literal.isPresent()) {
+            return StaticJavaParser.parseExpression(literal.orElseThrow());
+        }
+        return new NullLiteralExpr();
+    }
+
     private static void appendServiceInstantiationStatement(BlockStmt beforeBody, String serviceInstanceName, String serviceClassName) {
         ObjectCreationExpr newInstance = new ObjectCreationExpr(null, new ClassOrInterfaceType(serviceClassName), new NodeList<>());
         AssignExpr instantiation = new AssignExpr(new NameExpr(serviceInstanceName), newInstance, AssignExpr.Operator.ASSIGN);
         beforeBody.addStatement(instantiation);
     }
 
-    private static void appendMockReflectionSetFieldCalls(BlockStmt beforeBody, String serviceInstanceName, List<String> mockedFieldNames) {
+    private Set<String> appendConstructorAwareServiceInstantiation(BlockStmt beforeBody,
+                                                                   String serviceInstanceName,
+                                                                   String serviceClassName,
+                                                                   ClassOrInterfaceDeclaration bean) {
+        Map<String, Type> mockedFieldsByName = collectMockedFieldsByNameFromGeneratedTestClass();
+        Optional<ConstructorDeclaration> constructorOpt = findPreferredConstructor(bean);
+        if (constructorOpt.isEmpty() || constructorOpt.orElseThrow().getParameters().isEmpty()) {
+            appendServiceInstantiationStatement(beforeBody, serviceInstanceName, serviceClassName);
+            return Set.of();
+        }
+
+        ConstructorDeclaration constructor = constructorOpt.orElseThrow();
+        NodeList<Expression> arguments = new NodeList<>();
+        Set<String> constructorInjectedFields = new HashSet<>();
+        for (Parameter parameter : constructor.getParameters()) {
+            findMockFieldForConstructorParameter(parameter, mockedFieldsByName)
+                    .ifPresent(constructorInjectedFields::add);
+            arguments.add(constructorArgumentExpression(parameter, mockedFieldsByName));
+        }
+
+        ObjectCreationExpr newInstance = new ObjectCreationExpr(null, new ClassOrInterfaceType(serviceClassName), arguments);
+        AssignExpr instantiation = new AssignExpr(new NameExpr(serviceInstanceName), newInstance, AssignExpr.Operator.ASSIGN);
+        beforeBody.addStatement(instantiation);
+        return constructorInjectedFields;
+    }
+
+    private static void appendMockReflectionSetFieldCalls(BlockStmt beforeBody, String serviceInstanceName,
+                                                          List<String> mockedFieldNames, Set<String> alreadyInjectedFields) {
         for (String fieldName : mockedFieldNames) {
+            if (alreadyInjectedFields.contains(fieldName)) {
+                continue;
+            }
             MethodCallExpr setFieldCall = new MethodCallExpr(
                     new NameExpr(TestGenerationConstants.REFLECTION_TEST_UTILS_SIMPLE_NAME),
                     "setField",
@@ -1826,8 +1937,9 @@ public class UnitTestGenerator extends TestGenerator {
         String serviceInstanceName = AbstractCompiler.classToInstanceName(serviceClassName);
         List<String> mockedFieldNames = collectMockedFieldNamesFromGeneratedTestClass();
 
-        appendServiceInstantiationStatement(beforeBody, serviceInstanceName, serviceClassName);
-        appendMockReflectionSetFieldCalls(beforeBody, serviceInstanceName, mockedFieldNames);
+        Set<String> constructorInjectedFields = appendConstructorAwareServiceInstantiation(
+                beforeBody, serviceInstanceName, serviceClassName, bean);
+        appendMockReflectionSetFieldCalls(beforeBody, serviceInstanceName, mockedFieldNames, constructorInjectedFields);
         injectValueFieldsViaReflection(beforeBody, bean, serviceInstanceName);
     }
 
