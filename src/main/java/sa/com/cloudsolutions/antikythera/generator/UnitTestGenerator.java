@@ -30,6 +30,7 @@ import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.Name;
 import com.github.javaparser.ast.expr.SimpleName;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
+import com.github.javaparser.ast.expr.ThisExpr;
 import com.github.javaparser.ast.expr.NullLiteralExpr;
 import com.github.javaparser.ast.expr.VariableDeclarationExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
@@ -900,7 +901,13 @@ public class UnitTestGenerator extends TestGenerator {
         }
 
         addImportsForCasting(argMethod.get());
-        return baseTestClass != null && skipWhenArgumentUsage(argMethod.get());
+        return isSelfScopedOrUnscopedWhenArgument(argMethod.get())
+                || (baseTestClass != null && skipWhenArgumentUsage(argMethod.get()));
+    }
+
+    private boolean isSelfScopedOrUnscopedWhenArgument(MethodCallExpr argMethod) {
+        return argMethod.getScope().isEmpty()
+                || argMethod.getScope().filter(ThisExpr.class::isInstance).isPresent();
     }
 
     private boolean skipWhenArgumentUsage(MethodCallExpr argMethod) {
@@ -1421,6 +1428,11 @@ public class UnitTestGenerator extends TestGenerator {
         if (expr.isMethodCallExpr()) {
             MethodCallExpr raw = expr.asMethodCallExpr().clone();
             if (isMockitoWhenThenPrecondition(raw)) {
+                if (extractWhenArgumentMethodCall(raw)
+                        .map(this::isSelfScopedOrUnscopedWhenArgument)
+                        .orElse(false)) {
+                    return;
+                }
                 if (!containsStatement(body, raw)) {
                     body.addStatement(raw);
                 }
@@ -2101,6 +2113,7 @@ public class UnitTestGenerator extends TestGenerator {
 
     @Override
     public void save() throws IOException {
+        addDependencies();
         DepSolver.sortClass(testClass);
         removeDuplicateTests();
         String content = gen.toString();

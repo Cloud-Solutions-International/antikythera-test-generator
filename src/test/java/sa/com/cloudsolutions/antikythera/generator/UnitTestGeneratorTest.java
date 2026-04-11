@@ -393,6 +393,35 @@ class UnitTestGeneratorTest {
     }
 
     @Test
+    void testSaveFlushesPendingImportsForSetupOnlySuite() throws IOException {
+        unitTestGenerator.addBeforeClass();
+        java.lang.reflect.Field filePathField;
+        try {
+            filePathField = UnitTestGenerator.class.getDeclaredField("filePath");
+            filePathField.setAccessible(true);
+            String filePath = (String) filePathField.get(unitTestGenerator);
+            try {
+                unitTestGenerator.save();
+
+                CompilationUnit testCu = unitTestGenerator.getCompilationUnit();
+                Set<String> imports = testCu.getImports().stream()
+                        .map(imp -> imp.getName().asString())
+                        .collect(java.util.stream.Collectors.toSet());
+
+                assertTrue(imports.contains("org.junit.jupiter.api.BeforeEach"));
+                assertTrue(imports.contains("org.junit.jupiter.api.AfterEach"));
+                assertTrue(imports.contains("org.mockito.MockitoAnnotations"));
+                assertTrue(imports.contains("java.io.PrintStream"));
+                assertTrue(imports.contains("java.io.ByteArrayOutputStream"));
+            } finally {
+                java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(filePath));
+            }
+        } catch (ReflectiveOperationException e) {
+            fail(e);
+        }
+    }
+
+    @Test
     void testAddAssertsWithCapturedOutput() {
         MethodDeclaration methodUnderTest = classUnderTest.findFirst(MethodDeclaration.class,
                 md -> md.getNameAsString().equals("queries2")).orElseThrow();
@@ -477,6 +506,34 @@ class UnitTestGeneratorTest {
             TestGenerator.getImports().clear();
             TestGenerator.getImports().addAll(importSnapshot);
         }
+    }
+
+    @Test
+    void testSkipWhenUsageSkipsUnscopedHelperMethodCalls() throws Exception {
+        MethodCallExpr expr = StaticJavaParser
+                .parseExpression("Mockito.when(isPublishToHIMAllEnable(groupId, hospitalId)).thenReturn(true)")
+                .asMethodCallExpr();
+        Method method = UnitTestGenerator.class.getDeclaredMethod("skipWhenUsage", MethodCallExpr.class);
+        method.setAccessible(true);
+
+        boolean skipped = (boolean) method.invoke(unitTestGenerator, expr);
+
+        assertTrue(skipped);
+    }
+
+    @Test
+    void testApplyPreconditionWithMockitoSkipsUnscopedHelperWhenThen() throws Exception {
+        unitTestGenerator.testMethod = unitTestGenerator.buildTestMethod(
+                classUnderTest.findFirst(MethodDeclaration.class, md -> md.getNameAsString().equals("queries2")).orElseThrow());
+        Method method = UnitTestGenerator.class.getDeclaredMethod("applyPreconditionWithMockito", Expression.class);
+        method.setAccessible(true);
+
+        MethodCallExpr expr = StaticJavaParser
+                .parseExpression("Mockito.when(isPublishToHIMAllEnable(groupId, hospitalId)).thenReturn(true)")
+                .asMethodCallExpr();
+        method.invoke(unitTestGenerator, expr);
+
+        assertFalse(unitTestGenerator.testMethod.toString().contains("isPublishToHIMAllEnable("));
     }
 
     @Test
