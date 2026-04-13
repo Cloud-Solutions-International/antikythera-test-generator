@@ -125,6 +125,16 @@ class UnitTestGeneratorTest {
     }
 
     @Test
+    void testAddBeforeClassDeclaresServiceInstanceField() {
+        classUnderTest.addAnnotation("Service");
+
+        unitTestGenerator.addBeforeClass();
+
+        TypeDeclaration<?> generatedClass = unitTestGenerator.getCompilationUnit().getType(0);
+        assertTrue(generatedClass.getFieldByName("personService").isPresent());
+    }
+
+    @Test
     void testInjectComponentStereotypeUsesReflectionWiring() {
         var saved = new ArrayList<>(classUnderTest.getAnnotations());
         try {
@@ -534,6 +544,50 @@ class UnitTestGeneratorTest {
         method.invoke(unitTestGenerator, expr);
 
         assertFalse(unitTestGenerator.testMethod.toString().contains("isPublishToHIMAllEnable("));
+    }
+
+    @Test
+    void testApplyPreconditionWithMockitoSkipsUndeclaredWhenScope() throws Exception {
+        unitTestGenerator.testMethod = unitTestGenerator.buildTestMethod(
+                classUnderTest.findFirst(MethodDeclaration.class, md -> md.getNameAsString().equals("queries2")).orElseThrow());
+        Method identifyVariables = UnitTestGenerator.class.getDeclaredMethod("identifyVariables");
+        identifyVariables.setAccessible(true);
+        identifyVariables.invoke(unitTestGenerator);
+
+        Method method = UnitTestGenerator.class.getDeclaredMethod("applyPreconditionWithMockito", Expression.class);
+        method.setAccessible(true);
+
+        MethodCallExpr expr = StaticJavaParser
+                .parseExpression("Mockito.when(nursePatientProblemRepository.findByPatientIdWithTenant((List<Long>) Mockito.any(), Mockito.anyLong(), Mockito.anyLong())).thenReturn(new java.util.ArrayList<>())")
+                .asMethodCallExpr();
+        method.invoke(unitTestGenerator, expr);
+
+        assertFalse(unitTestGenerator.testMethod.toString().contains("nursePatientProblemRepository.findByPatientIdWithTenant"));
+    }
+
+    @Test
+    void testCoerceInitializerForParameterTypeWrapsScalarForListParameter() throws Exception {
+        Parameter param = StaticJavaParser.parseParameter("List<Long> patientIds");
+        Method method = UnitTestGenerator.class.getDeclaredMethod("coerceInitializerForParameterType", Type.class, Expression.class);
+        method.setAccessible(true);
+
+        Expression expr = (Expression) method.invoke(unitTestGenerator, param.getType(), new LongLiteralExpr("0L"));
+
+        assertEquals("new java.util.ArrayList<>(java.util.List.of(0L))", expr.toString());
+    }
+
+    @Test
+    void testCoerceInitializerForParameterTypeWrapsScalarFactoryCallForListParameter() throws Exception {
+        Parameter param = StaticJavaParser.parseParameter("List<Long> patientIds");
+        Method method = UnitTestGenerator.class.getDeclaredMethod("coerceInitializerForParameterType", Type.class, Expression.class);
+        method.setAccessible(true);
+
+        Expression expr = (Expression) method.invoke(
+                unitTestGenerator,
+                param.getType(),
+                StaticJavaParser.parseExpression("Long.valueOf(\"0\")"));
+
+        assertEquals("new java.util.ArrayList<>(java.util.List.of(Long.valueOf(\"0\")))", expr.toString());
     }
 
     @Test

@@ -42,6 +42,8 @@ import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.type.ReferenceType;
 import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+import com.github.javaparser.resolution.MethodUsage;
+import com.github.javaparser.resolution.types.ResolvedType;
 import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +55,7 @@ import sa.com.cloudsolutions.antikythera.evaluator.ArgumentGenerator;
 import sa.com.cloudsolutions.antikythera.evaluator.BranchingTrace;
 import sa.com.cloudsolutions.antikythera.evaluator.Evaluator;
 import sa.com.cloudsolutions.antikythera.evaluator.ExceptionContext;
+import sa.com.cloudsolutions.antikythera.evaluator.GeneratorState;
 import sa.com.cloudsolutions.antikythera.evaluator.Precondition;
 import sa.com.cloudsolutions.antikythera.evaluator.Reflect;
 import sa.com.cloudsolutions.antikythera.evaluator.TestSuiteEvaluator;
@@ -902,7 +905,7 @@ public class UnitTestGenerator extends TestGenerator {
 
         addImportsForCasting(argMethod.get());
         return isSelfScopedOrUnscopedWhenArgument(argMethod.get())
-                || (baseTestClass != null && skipWhenArgumentUsage(argMethod.get()));
+                || skipWhenArgumentUsage(argMethod.get());
     }
 
     private boolean isSelfScopedOrUnscopedWhenArgument(MethodCallExpr argMethod) {
@@ -971,6 +974,9 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private boolean mockedByBaseTestClass(Expression arg) {
+        if (baseTestClass == null) {
+            return false;
+        }
         for (TypeDeclaration<?> t : baseTestClass.getTypes()) {
             for (FieldDeclaration fd : t.getFields()) {
                 if ((fd.getAnnotationByName(MOCK_BEAN).isPresent() ||
@@ -1213,8 +1219,9 @@ public class UnitTestGenerator extends TestGenerator {
     private void mockWithoutMockito(Parameter param, Variable v) {
         BlockStmt body = getBody(testMethod);
         String nameAsString = param.getNameAsString();
+        Expression initializer = coerceInitializerForParameterType(param.getType(), v.getInitializer().getFirst());
         body.addStatement(param.getTypeAsString() + " " + nameAsString + " = " +
-                v.getInitializer().getFirst() + ";");
+                initializer + ";");
         // Add import for the declared type using the variable's class (FQN known from evaluation)
         if (v.getClazz() != null) {
             String fqn = v.getClazz().getName();
@@ -1303,6 +1310,47 @@ public class UnitTestGenerator extends TestGenerator {
             }
         }
         return initializer;
+    }
+
+    private Expression coerceInitializerForParameterType(Type type, Expression initializer) {
+        Expression coerced = coerceInitializerForFieldType(type, initializer);
+        if (coerced == null || !TypeInspector.isCollectionType(type)) {
+            return coerced;
+        }
+        if (coerced.isArrayCreationExpr() || coerced.isNameExpr()) {
+            return coerced;
+        }
+        if ((coerced.isMethodCallExpr() || coerced.isObjectCreationExpr() || coerced.isCastExpr())
+                && looksLikeCollectionExpression(coerced)) {
+            return coerced;
+        }
+
+        String rawType = TypeInspector.rawSimpleName(type);
+        if (rawType.equals("List") || rawType.equals("Collection") || rawType.equals("ArrayList")) {
+            addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
+            addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
+            return StaticJavaParser.parseExpression("new java.util.ArrayList<>(java.util.List.of(" + coerced + "))");
+        }
+        if (rawType.equals("Set") || rawType.equals("HashSet")) {
+            addImport(new ImportDeclaration("java.util.Set", false, false));
+            addImport(new ImportDeclaration("java.util.HashSet", false, false));
+            return StaticJavaParser.parseExpression("new java.util.HashSet<>(java.util.List.of(" + coerced + "))");
+        }
+        return coerced;
+    }
+
+    private boolean looksLikeCollectionExpression(Expression expression) {
+        String text = expression.toString();
+        return text.contains("List.of(")
+                || text.contains("Set.of(")
+                || text.contains("Arrays.asList(")
+                || text.contains("Collections.singletonList(")
+                || text.contains("Collections.singleton(")
+                || text.contains("new ArrayList")
+                || text.contains("new java.util.ArrayList")
+                || text.contains("new HashSet")
+                || text.contains("new java.util.HashSet")
+                || text.contains(".collect(");
     }
 
     String coerceGeneratedStringPlaceholder(String value) {
@@ -1402,6 +1450,102 @@ public class UnitTestGenerator extends TestGenerator {
                 .orElse(false);
     }
 
+    private void normalizeMockitoThenReturnCollectionElementType(MethodCallExpr raw) {
+        if (!"thenReturn".equals(raw.getNameAsString()) || raw.getArguments().isEmpty()) {
+            return;
+        }
+        Expression returnExpr = raw.getArgument(0);
+        if (!(returnExpr instanceof ObjectCreationExpr oce) || oce.getArguments().size() != 1) {
+            return;
+        }
+        String createdType = oce.getTypeAsString();
+        if (!createdType.contains("ArrayList") && !createdType.contains("HashSet") && !createdType.contains("LinkedList")) {
+            return;
+        }
+        Expression seedExpr = oce.getArgument(0);
+        if (!(seedExpr instanceof MethodCallExpr seedCall) || seedCall.getArguments().size() != 1) {
+            return;
+        }
+        String seedText = seedCall.toString();
+        if (!(seedText.startsWith("java.util.List.of(")
+                || seedText.startsWith("List.of(")
+                || seedText.startsWith("java.util.Set.of(")
+                || seedText.startsWith("Set.of("))) {
+            return;
+        }
+        Expression elementExpr = seedCall.getArgument(0);
+        if (!(elementExpr.isIntegerLiteralExpr()
+                || elementExpr.isLongLiteralExpr()
+                || elementExpr.isDoubleLiteralExpr()
+                || elementExpr.isStringLiteralExpr()
+                || elementExpr.isBooleanLiteralExpr()
+                || elementExpr.isCharLiteralExpr())) {
+            return;
+        }
+
+        MethodCallExpr whenArgument = extractWhenArgumentMethodCall(raw).orElse(null);
+        if (whenArgument == null) {
+            return;
+        }
+        String elementTypeName = resolveCollectionElementTypeName(whenArgument);
+        if (elementTypeName == null || elementTypeName.equals("java.lang.Object")) {
+            return;
+        }
+        Expression replacement = createCollectionElementExpression(elementTypeName);
+        if (replacement != null) {
+            seedCall.setArgument(0, replacement);
+        }
+    }
+
+    private String resolveCollectionElementTypeName(MethodCallExpr whenArgument) {
+        Optional<MethodUsage> methodUsage = AbstractCompiler.resolveMethodAsUsage(whenArgument);
+        if (methodUsage.isEmpty()) {
+            return whenArgument.getScope()
+                    .flatMap(this::resolveExpressionType)
+                    .flatMap(scopeTypeName -> resolveCollectionElementTypeFromScopeType(scopeTypeName, whenArgument))
+                    .orElse(null);
+        }
+        ResolvedType returnType = methodUsage.orElseThrow().returnType();
+        if (!returnType.isReferenceType()) {
+            return null;
+        }
+        List<ResolvedType> typeParameters = returnType.asReferenceType().typeParametersValues();
+        if (typeParameters.isEmpty()) {
+            return null;
+        }
+        return typeParameters.getFirst().describe();
+    }
+
+    private Optional<String> resolveCollectionElementTypeFromScopeType(String scopeTypeName, MethodCallExpr whenArgument) {
+        return AntikytheraRunTime.getTypeDeclaration(scopeTypeName)
+                .flatMap(type -> type.getMethodsByName(whenArgument.getNameAsString()).stream()
+                        .filter(md -> md.getParameters().size() == whenArgument.getArguments().size())
+                        .findFirst())
+                .flatMap(md -> md.getType().asClassOrInterfaceType().getTypeArguments()
+                        .flatMap(args -> args.stream().findFirst())
+                        .map(arg -> arg.isClassOrInterfaceType()
+                                ? AbstractCompiler.findFullyQualifiedName(
+                                        md.findCompilationUnit().orElse(compilationUnitUnderTest),
+                                        arg.asClassOrInterfaceType().getNameAsString())
+                                : arg.asString()));
+    }
+
+    private Expression createCollectionElementExpression(String elementTypeName) {
+        String normalizedType = elementTypeName.replace("? extends ", "").replace("? super ", "").trim();
+        if (normalizedType.endsWith("[]") || normalizedType.contains("<") || normalizedType.startsWith("java.lang.")) {
+            return null;
+        }
+        GeneratorState.addImport(new ImportDeclaration(normalizedType, false, false));
+        Optional<TypeDeclaration<?>> declaration = AntikytheraRunTime.getTypeDeclaration(normalizedType);
+        if (declaration.isPresent() && declaration.orElseThrow().isClassOrInterfaceDeclaration()) {
+            ClassOrInterfaceDeclaration coid = declaration.orElseThrow().asClassOrInterfaceDeclaration();
+            if (!coid.isInterface() && !coid.isAbstract()) {
+                return StaticJavaParser.parseExpression("new " + normalizedType + "()");
+            }
+        }
+        return StaticJavaParser.parseExpression("org.mockito.Mockito.mock(" + normalizedType + ".class)");
+    }
+
     Expression createOptionalValueExpression(Object value) {
         if (value instanceof String s) {
             return new StringLiteralExpr(s);
@@ -1428,11 +1572,16 @@ public class UnitTestGenerator extends TestGenerator {
         if (expr.isMethodCallExpr()) {
             MethodCallExpr raw = expr.asMethodCallExpr().clone();
             if (isMockitoWhenThenPrecondition(raw)) {
+                if (skipWhenUsage(raw)) {
+                    return;
+                }
+                normalizeMockitoThenReturnCollectionElementType(raw);
                 if (extractWhenArgumentMethodCall(raw)
                         .map(this::isSelfScopedOrUnscopedWhenArgument)
                         .orElse(false)) {
                     return;
                 }
+                addImportsForReferencedTypes(raw);
                 if (!containsStatement(body, raw)) {
                     body.addStatement(raw);
                 }
@@ -1462,6 +1611,7 @@ public class UnitTestGenerator extends TestGenerator {
                         ));
                     }
                     else {
+                        addImportsForReferencedTypes(mce);
                         if (!containsStatement(body, mce)) {
                             body.addStatement(mce);
                         }
@@ -1483,6 +1633,33 @@ public class UnitTestGenerator extends TestGenerator {
                 .filter(Statement::isExpressionStmt)
                 .map(stmt -> stmt.asExpressionStmt().getExpression())
                 .anyMatch(existing -> existing.equals(expr));
+    }
+
+    private void addImportsForReferencedTypes(Expression expr) {
+        addImportsForObjectCreations(expr);
+        for (FieldAccessExpr fieldAccessExpr : expr.findAll(FieldAccessExpr.class)) {
+            Expression scope = fieldAccessExpr.getScope();
+            if (!scope.isNameExpr()) {
+                continue;
+            }
+            ImportWrapper wrapper = AbstractCompiler.findImport(compilationUnitUnderTest, scope.asNameExpr().getNameAsString());
+            if (wrapper != null) {
+                addImport(wrapper.getImport());
+            }
+        }
+        for (MethodCallExpr methodCallExpr : expr.findAll(MethodCallExpr.class)) {
+            methodCallExpr.getScope()
+                    .filter(Expression::isNameExpr)
+                    .map(Expression::asNameExpr)
+                    .map(NameExpr::getNameAsString)
+                    .filter(name -> !name.isEmpty() && Character.isUpperCase(name.charAt(0)))
+                    .ifPresent(typeName -> {
+                        ImportWrapper wrapper = AbstractCompiler.findImport(compilationUnitUnderTest, typeName);
+                        if (wrapper != null) {
+                            addImport(wrapper.getImport());
+                        }
+                    });
+        }
     }
 
     private boolean isCollectionMutationPrecondition(MethodCallExpr mce) {
@@ -1570,14 +1747,20 @@ public class UnitTestGenerator extends TestGenerator {
                     .orElse(""));
         }
         if (scope.isNameExpr()) {
-            if (testMethod == null) {
-                return Optional.empty();
-            }
             String variableName = scope.asNameExpr().getNameAsString();
-            return testMethod.findAll(VariableDeclarator.class).stream()
-                    .filter(vd -> vd.getNameAsString().equals(variableName))
+            if (testMethod != null) {
+                Optional<String> localType = testMethod.findAll(VariableDeclarator.class).stream()
+                        .filter(vd -> vd.getNameAsString().equals(variableName))
+                        .map(vd -> resolveFieldTypeName(vd.getType()))
+                        .findFirst()
+                        .filter(typeName -> !typeName.isBlank());
+                if (localType.isPresent()) {
+                    return localType;
+                }
+            }
+            return testClass.getFieldByName(variableName)
+                    .map(field -> field.getVariable(0))
                     .map(vd -> resolveFieldTypeName(vd.getType()))
-                    .findFirst()
                     .filter(typeName -> !typeName.isBlank());
         }
         return Optional.empty();
@@ -1894,6 +2077,12 @@ public class UnitTestGenerator extends TestGenerator {
         beforeBody.addStatement(instantiation);
     }
 
+    private void ensureServiceInstanceFieldDeclared(String serviceClassName, String serviceInstanceName) {
+        if (testClass != null && testClass.getFieldByName(serviceInstanceName).isEmpty()) {
+            testClass.addField(serviceClassName, serviceInstanceName);
+        }
+    }
+
     private Set<String> appendConstructorAwareServiceInstantiation(BlockStmt beforeBody,
                                                                    String serviceInstanceName,
                                                                    String serviceClassName,
@@ -1948,6 +2137,7 @@ public class UnitTestGenerator extends TestGenerator {
         ClassOrInterfaceDeclaration bean = target.get().bean();
         String serviceInstanceName = AbstractCompiler.classToInstanceName(serviceClassName);
         List<String> mockedFieldNames = collectMockedFieldNamesFromGeneratedTestClass();
+        ensureServiceInstanceFieldDeclared(serviceClassName, serviceInstanceName);
 
         Set<String> constructorInjectedFields = appendConstructorAwareServiceInstantiation(
                 beforeBody, serviceInstanceName, serviceClassName, bean);

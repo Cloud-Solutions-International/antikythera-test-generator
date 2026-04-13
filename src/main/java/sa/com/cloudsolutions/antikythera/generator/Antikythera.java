@@ -167,6 +167,7 @@ public class Antikythera {
      */
     public void generateApiTests() throws IOException, XmlPullParserException, EvaluatorException {
         for (String controller : controllers) {
+            MockingRegistry.clearMockedFields();
 
             String controllersCleaned = controller.replace(JAVA, "").split("#")[0];
             RestControllerParser processor = new RestControllerParser(controllersCleaned);
@@ -347,6 +348,7 @@ public class Antikythera {
     private void processService(String servicePath, String[] parts) throws IOException {
         logger.info("******************");
         logger.info("Processing service {}", servicePath);
+        MockingRegistry.clearMockedFields();
 
         ServicesParser processor = new ServicesParser(servicePath);
         String entry = parts.length == 2 ? servicePath + "#" + parts[1] : servicePath;
