@@ -497,7 +497,8 @@ public class UnitTestGenerator extends TestGenerator {
         }
 
         Type elementType = typeArgOpt.orElseThrow();
-        String rawElementType = elementType.asString().replaceAll("<.*>", "").trim();
+        String elementTypeName = elementType.asString().trim();
+        String rawElementType = elementTypeName.replaceAll("<.*>", "").trim();
         String fqcn = AbstractCompiler.findFullyQualifiedName(compilationUnitUnderTest, rawElementType);
         String elementInitializer;
         if (fqcn != null) {
@@ -510,8 +511,8 @@ public class UnitTestGenerator extends TestGenerator {
 
         String rawCollectionType = TypeInspector.rawSimpleName(param.getType());
         String collectionInitializer = switch (rawCollectionType) {
-            case "Set", "HashSet" -> "new java.util.HashSet<>(java.util.List.of(" + elementInitializer + "))";
-            default -> "new java.util.ArrayList<>(java.util.List.of(" + elementInitializer + "))";
+            case "Set", "HashSet" -> "new java.util.HashSet<" + elementTypeName + ">(java.util.List.of(" + elementInitializer + "))";
+            default -> "new java.util.ArrayList<" + elementTypeName + ">(java.util.List.of(" + elementInitializer + "))";
         };
         return StaticJavaParser.parseExpression(collectionInitializer);
     }
@@ -1309,6 +1310,17 @@ public class UnitTestGenerator extends TestGenerator {
                 return new LongLiteralExpr(text + "L");
             }
         }
+        if (rawType.equals("String") || rawType.equals("java.lang.String")) {
+            if (initializer.isIntegerLiteralExpr()) {
+                return new StringLiteralExpr(initializer.asIntegerLiteralExpr().getValue());
+            }
+            if (initializer.isLongLiteralExpr()) {
+                return new StringLiteralExpr(initializer.asLongLiteralExpr().getValue().replace("L", ""));
+            }
+            if (initializer.isDoubleLiteralExpr()) {
+                return new StringLiteralExpr(initializer.asDoubleLiteralExpr().getValue());
+            }
+        }
         return initializer;
     }
 
@@ -1325,16 +1337,32 @@ public class UnitTestGenerator extends TestGenerator {
             return coerced;
         }
 
+        // Extract element type from collection type using the AST (e.g., List<String> -> String).
+        Optional<Type> elementTypeOpt = Optional.empty();
+        if (type.isClassOrInterfaceType()) {
+            elementTypeOpt = type.asClassOrInterfaceType().getTypeArguments()
+                    .flatMap(args -> args.getFirst());
+        }
+
+        // Coerce the element initializer to match the declared element type before wrapping it in
+        // a collection literal.  Without this step a List<String> setter would receive an integer
+        // literal (the evaluator's default) and produce uncompilable code such as List.of(1).
+        Expression coercedElement = elementTypeOpt
+                .map(elementType -> coerceInitializerForFieldType(elementType, coerced))
+                .orElse(coerced);
+
+        String typeParam = elementTypeOpt.map(t -> "<" + t.asString().trim() + ">").orElse("");
+
         String rawType = TypeInspector.rawSimpleName(type);
         if (rawType.equals("List") || rawType.equals("Collection") || rawType.equals("ArrayList")) {
             addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
             addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
-            return StaticJavaParser.parseExpression("new java.util.ArrayList<>(java.util.List.of(" + coerced + "))");
+            return StaticJavaParser.parseExpression("new java.util.ArrayList" + typeParam + "(java.util.List.of(" + coercedElement + "))");
         }
         if (rawType.equals("Set") || rawType.equals("HashSet")) {
             addImport(new ImportDeclaration("java.util.Set", false, false));
             addImport(new ImportDeclaration("java.util.HashSet", false, false));
-            return StaticJavaParser.parseExpression("new java.util.HashSet<>(java.util.List.of(" + coerced + "))");
+            return StaticJavaParser.parseExpression("new java.util.HashSet" + typeParam + "(java.util.List.of(" + coercedElement + "))");
         }
         return coerced;
     }

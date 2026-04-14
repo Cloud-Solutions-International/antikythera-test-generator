@@ -13,6 +13,7 @@ import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.BooleanLiteralExpr;
+import com.github.javaparser.ast.expr.IntegerLiteralExpr;
 import com.github.javaparser.ast.expr.LongLiteralExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
@@ -573,7 +574,7 @@ class UnitTestGeneratorTest {
 
         Expression expr = (Expression) method.invoke(unitTestGenerator, param.getType(), new LongLiteralExpr("0L"));
 
-        assertEquals("new java.util.ArrayList<>(java.util.List.of(0L))", expr.toString());
+        assertEquals("new java.util.ArrayList<Long>(java.util.List.of(0L))", expr.toString());
     }
 
     @Test
@@ -587,7 +588,21 @@ class UnitTestGeneratorTest {
                 param.getType(),
                 StaticJavaParser.parseExpression("Long.valueOf(\"0\")"));
 
-        assertEquals("new java.util.ArrayList<>(java.util.List.of(Long.valueOf(\"0\")))", expr.toString());
+        assertEquals("new java.util.ArrayList<Long>(java.util.List.of(Long.valueOf(\"0\")))", expr.toString());
+    }
+
+    @Test
+    void testCoerceInitializerForParameterTypeCoercesIntegerToStringForListOfString() throws Exception {
+        // When a List<String> setter receives an integer literal from the evaluator (its default
+        // numeric placeholder), the element must be coerced to a string literal so that the
+        // generated code compiles. E.g. List.of(1) is invalid for a List<String>.
+        Parameter param = StaticJavaParser.parseParameter("List<String> icdCodes");
+        Method method = UnitTestGenerator.class.getDeclaredMethod("coerceInitializerForParameterType", Type.class, Expression.class);
+        method.setAccessible(true);
+
+        Expression expr = (Expression) method.invoke(unitTestGenerator, param.getType(), new IntegerLiteralExpr("1"));
+
+        assertEquals("new java.util.ArrayList<String>(java.util.List.of(\"1\"))", expr.toString());
     }
 
     @Test
