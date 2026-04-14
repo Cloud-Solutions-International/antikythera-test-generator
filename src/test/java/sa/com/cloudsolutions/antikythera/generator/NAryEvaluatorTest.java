@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *       {@code assertThrows(NullPointerException.class, () -> resp.toPredicate(null, null, null))}.</li>
  * </ol>
  *
- * <p>The fixture is {@link sa.com.cloudsolutions.antikythera.testhelper.evaluator.RecordSearchSpecification}
+ * <p>The fixture is  sa.com.cloudsolutions.antikythera.testhelper.evaluator.RecordSearchSpecification
  * — an anonymised equivalent of the real-world {@code ProblemSearchSpecification} class that
  * triggered the original NAry evaluator bug.</p>
  */
