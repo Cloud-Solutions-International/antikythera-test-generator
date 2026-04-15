@@ -91,7 +91,7 @@ class JunitAsserterTest {
         response.setException(new EvaluatorException("wrap", new JsonIOException()));
 
         Expression expr = asserter.assertThrows("someMethod();", response);
-        assertEquals("assertDoesNotThrow(() -> someMethod())", expr.toString());
+        assertEquals("assertDoesNotThrow(() -> {\n    someMethod();\n})", expr.toString());
     }
 
     @Test

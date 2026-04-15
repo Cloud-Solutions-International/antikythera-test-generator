@@ -1726,10 +1726,43 @@ public class UnitTestGenerator extends TestGenerator {
             mce.setArgument(0, new StringLiteralExpr(coerceGeneratedStringPlaceholder(stringLiteral.getValue())));
         }
         if (mce.getScope().isPresent()) {
-            resolveSetterParameterType(mce.getScope().get(), mce.getNameAsString()).ifPresent(parameterType ->
-                    mce.setArgument(0, coerceInitializerForFieldType(parameterType, mce.getArgument(0))));
+            resolveSetterParameterType(mce.getScope().get(), mce.getNameAsString()).ifPresent(parameterType -> {
+                mce.setArgument(0, coerceInitializerForFieldType(parameterType, mce.getArgument(0)));
+                coerceCollectionElementTypes(mce.getArgument(0), parameterType);
+            });
         }
         return mce;
+    }
+
+    void coerceCollectionElementTypes(Expression arg, Type parameterType) {
+        if (!TypeInspector.isCollectionType(parameterType) || !parameterType.isClassOrInterfaceType()) {
+            return;
+        }
+        Optional<Type> elementTypeOpt = parameterType.asClassOrInterfaceType().getTypeArguments()
+                .flatMap(args -> args.getFirst());
+        if (elementTypeOpt.isEmpty()) {
+            return;
+        }
+        if (!(arg instanceof ObjectCreationExpr oce) || oce.getArguments().size() != 1) {
+            return;
+        }
+        Expression seedExpr = oce.getArgument(0);
+        if (!(seedExpr instanceof MethodCallExpr seedCall)) {
+            return;
+        }
+        String seedText = seedCall.toString();
+        if (!(seedText.startsWith("java.util.List.of(") || seedText.startsWith("List.of(")
+                || seedText.startsWith("java.util.Set.of(") || seedText.startsWith("Set.of("))) {
+            return;
+        }
+        Type elementType = elementTypeOpt.orElseThrow();
+        for (int i = 0; i < seedCall.getArguments().size(); i++) {
+            Expression elementExpr = seedCall.getArgument(i);
+            Expression coerced = coerceInitializerForFieldType(elementType, elementExpr);
+            if (coerced != elementExpr) {
+                seedCall.setArgument(i, coerced);
+            }
+        }
     }
 
     private boolean setterExistsOnScopeType(Expression scope, String setterName) {
@@ -1762,9 +1795,17 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     Optional<Type> resolveSetterParameterType(TypeDeclaration<?> type, String setterName) {
-        return type.getMethodsByName(setterName).stream()
+        Optional<Type> fromMethod = type.getMethodsByName(setterName).stream()
                 .filter(md -> md.getParameters().size() == 1)
                 .map(md -> md.getParameter(0).getType())
+                .findFirst();
+        if (fromMethod.isPresent()) {
+            return fromMethod;
+        }
+        String propertyName = AbstractCompiler.classToInstanceName(setterName.substring(3));
+        return type.getFields().stream()
+                .filter(f -> f.getVariable(0).getNameAsString().equals(propertyName))
+                .map(f -> f.getVariable(0).getType())
                 .findFirst();
     }
 

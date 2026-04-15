@@ -995,6 +995,34 @@ class UnitTestGeneratorTest {
         assertTrue(assertion.toString().contains("\"Episode saved  ---->\""));
         assertFalse(assertion.toString().contains("{}"));
     }
+
+    @Test
+    void testCoerceCollectionElementTypesCoercesIntegerToStringInSetterArg() throws Exception {
+        Expression collectionExpr = StaticJavaParser.parseExpression(
+                "new java.util.ArrayList<>(java.util.List.of(1))");
+        Type paramType = StaticJavaParser.parseType("List<String>");
+
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "coerceCollectionElementTypes", Expression.class, Type.class);
+        method.setAccessible(true);
+        method.invoke(unitTestGenerator, collectionExpr, paramType);
+
+        assertEquals("new java.util.ArrayList<>(java.util.List.of(\"1\"))", collectionExpr.toString());
+    }
+
+    @Test
+    void testCoerceCollectionElementTypesCoercesIntegerToLongInSetterArg() throws Exception {
+        Expression collectionExpr = StaticJavaParser.parseExpression(
+                "new java.util.ArrayList<>(java.util.List.of(1))");
+        Type paramType = StaticJavaParser.parseType("List<Long>");
+
+        Method method = UnitTestGenerator.class.getDeclaredMethod(
+                "coerceCollectionElementTypes", Expression.class, Type.class);
+        method.setAccessible(true);
+        method.invoke(unitTestGenerator, collectionExpr, paramType);
+
+        assertEquals("new java.util.ArrayList<>(java.util.List.of(1L))", collectionExpr.toString());
+    }
 }
 
 class UnitTestGeneratorMoreTests extends TestHelper {

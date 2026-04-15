@@ -243,9 +243,12 @@ final class MockFieldSupport {
             TypeDeclaration<?> ownerType, Expression fieldInitializer) {
         Expression coercedInitializer = fieldInitializer;
         if (fieldInitializer != null) {
-            coercedInitializer = owner.resolveSetterParameterType(ownerType, setterName)
+            Optional<Type> paramType = owner.resolveSetterParameterType(ownerType, setterName);
+            coercedInitializer = paramType
                     .map(type -> owner.coerceInitializerForFieldType(type, fieldInitializer))
                     .orElse(fieldInitializer);
+            Expression finalInit = coercedInitializer;
+            paramType.ifPresent(type -> owner.coerceCollectionElementTypes(finalInit, type));
         }
         if (coercedInitializer == null) {
             return;
