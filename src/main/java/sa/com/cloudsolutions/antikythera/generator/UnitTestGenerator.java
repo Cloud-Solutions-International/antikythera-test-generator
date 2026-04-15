@@ -931,7 +931,11 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private boolean shouldSkipWhenScope(Expression scopeExpr) {
-        return mockedByBaseTestClass(scopeExpr) || (variablesIdentified && !variables.containsKey(scopeExpr.toString()));
+        String scopeKey = scopeExpr.toString();
+        if (scopeExpr.isFieldAccessExpr() && scopeExpr.asFieldAccessExpr().getScope().isThisExpr()) {
+            scopeKey = scopeExpr.asFieldAccessExpr().getNameAsString();
+        }
+        return mockedByBaseTestClass(scopeExpr) || (variablesIdentified && !variables.containsKey(scopeKey));
     }
 
     /**
