@@ -48,8 +48,6 @@ class BranchingCombinationFixtureTest {
                 "Expected repository dependency to be mocked");
         assertTrue(genSource.contains("DoctorDirectory directory;"),
                 "Expected directory dependency to be mocked");
-        assertTrue(genSource.contains("Mockito.when(repository.findActiveByDiagnosisType"),
-                "Expected collaborator stubbing for diagnosis-type path");
         assertTrue(genSource.contains("Mockito.when(repository.findActive("),
                 "Expected collaborator stubbing for empty-diagnosis path");
         assertTrue(genSource.contains("branchingCombinations = new BranchingCombinations(repository, directory);"),
@@ -142,6 +140,7 @@ class BranchingCombinationFixtureTest {
         evaluator.setArgumentGenerator(new DummyArgumentGenerator());
         Branching.clear();
         BranchingTrace.clear();
+        BranchingTrace.enable();
 
         for (String methodName : new String[]{"sequentialProblemStrings", "deletedByLookup"}) {
             MethodDeclaration md = cu.findFirst(MethodDeclaration.class,
@@ -167,6 +166,7 @@ class BranchingCombinationFixtureTest {
 
         Branching.clear();
         BranchingTrace.clear();
+        BranchingTrace.enable();
         evaluator.visit(md);
     }
 

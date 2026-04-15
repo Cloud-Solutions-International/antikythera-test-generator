@@ -66,9 +66,10 @@ final class MockFieldSupport {
 
     void discoverFieldsToMock(CompilationUnit cu) {
         for (TypeDeclaration<?> decl : cu.getTypes()) {
-            if (decl instanceof ClassOrInterfaceDeclaration c && UnitTestGenerator.isSpringStereotypeBean(c)
+            if (decl instanceof ClassOrInterfaceDeclaration c
                     && owner.findSuite(decl).isPresent()) {
-                detectConstructorInjection(cu, decl);
+                boolean isSpring = UnitTestGenerator.isSpringStereotypeBean(c);
+                detectConstructorInjection(cu, decl, isSpring);
             }
             identifyAutoWiring(cu, decl);
         }
@@ -128,17 +129,35 @@ final class MockFieldSupport {
         field.addAnnotation(UnitTestGenerator.MOCK);
     }
 
-    private void detectConstructorInjection(CompilationUnit cu, TypeDeclaration<?> decl) {
+    private void detectConstructorInjection(CompilationUnit cu, TypeDeclaration<?> decl, boolean isSprin) {
         for (ConstructorDeclaration constructor : decl.getConstructors()) {
             Map<String, String> paramToFieldMap = mapParamToFields(constructor);
             for (Parameter param : constructor.getParameters()) {
-                detectConstructorInjectionHelper(cu, owner.testSuiteClass(), param, paramToFieldMap);
+                detectConstructorInjectionHelper(cu, owner.testSuiteClass(), param, paramToFieldMap, isSprin);
             }
         }
     }
 
+    static boolean isMockableConstructorParamType(CompilationUnit cu, Type paramType) {
+        if (!paramType.isClassOrInterfaceType()) {
+            return false;
+        }
+        String simpleName = paramType.asClassOrInterfaceType().getNameAsString();
+        if (simpleName.endsWith("Repository") || simpleName.endsWith("Dao") || simpleName.endsWith("Client")) {
+            return true;
+        }
+        TypeWrapper wrapper = AbstractCompiler.findType(cu, simpleName);
+        return wrapper != null
+                && wrapper.getType() instanceof ClassOrInterfaceDeclaration coid
+                && coid.isInterface();
+    }
+
     private void detectConstructorInjectionHelper(CompilationUnit cu, ClassOrInterfaceDeclaration suite,
-                                                  Parameter param, Map<String, String> paramToFieldMap) {
+                                                  Parameter param, Map<String, String> paramToFieldMap,
+                                                  boolean isSpringBean) {
+        if (!isSpringBean && !isMockableConstructorParamType(cu, param.getType())) {
+            return;
+        }
         List<TypeWrapper> wrappers = AbstractCompiler.findTypesInVariable(param);
         String registryKey = MockingRegistry.generateRegistryKey(wrappers);
         String paramName = param.getNameAsString();
@@ -211,13 +230,13 @@ final class MockFieldSupport {
     private void addListCollectionSetterStub(BlockStmt body, String receiverName, String setterName) {
         TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_LIST, false, false));
         TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_ARRAY_LIST, false, false));
-        body.addStatement(String.format("%s.%s(new java.util.ArrayList<>());", receiverName, setterName));
+        body.addStatement(String.format("%s.%s(new ArrayList<>());", receiverName, setterName));
     }
 
     private void addMapSetterStub(BlockStmt body, String receiverName, String setterName) {
         TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_MAP, false, false));
         TestGenerator.addImport(new ImportDeclaration(Reflect.JAVA_UTIL_HASH_MAP, false, false));
-        body.addStatement(String.format("%s.%s(new java.util.HashMap<>());", receiverName, setterName));
+        body.addStatement(String.format("%s.%s(new HashMap());", receiverName, setterName));
     }
 
     private void addSetterCallWithCoercedInitializer(BlockStmt body, String receiverName, String setterName,

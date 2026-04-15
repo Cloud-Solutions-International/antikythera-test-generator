@@ -929,7 +929,7 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private boolean shouldSkipWhenScope(Expression scopeExpr) {
-        return mockedByBaseTestClass(scopeExpr) || !variables.containsKey(scopeExpr.toString());
+        return mockedByBaseTestClass(scopeExpr) || (!variables.isEmpty() && !variables.containsKey(scopeExpr.toString()));
     }
 
     /**
@@ -1022,7 +1022,7 @@ public class UnitTestGenerator extends TestGenerator {
     @SuppressWarnings("unchecked")
     void createInstance() {
         methodUnderTest.findAncestor(ClassOrInterfaceDeclaration.class).ifPresent(c -> {
-            if (isSpringStereotypeBean(c)) {
+            if (isSpringStereotypeBean(c) || hasConstructorInjectedMocks(c)) {
                 injectMocks(c);
             } else if (methodUnderTest instanceof MethodDeclaration md && md.isStatic()) {
                 instanceName = c.getNameAsString();
@@ -2018,11 +2018,23 @@ public class UnitTestGenerator extends TestGenerator {
 
     private Optional<StereotypeServiceTarget> findStereotypeServiceTarget() {
         for (TypeDeclaration<?> type : compilationUnitUnderTest.getTypes()) {
-            if (type instanceof ClassOrInterfaceDeclaration c && isSpringStereotypeBean(c)) {
+            if (type instanceof ClassOrInterfaceDeclaration c
+                    && (isSpringStereotypeBean(c) || hasConstructorInjectedMocks(c))) {
                 return Optional.of(new StereotypeServiceTarget(type.getNameAsString(), c));
             }
         }
         return Optional.empty();
+    }
+
+    private boolean hasConstructorInjectedMocks(ClassOrInterfaceDeclaration c) {
+        for (ConstructorDeclaration constructor : c.getConstructors()) {
+            for (Parameter param : constructor.getParameters()) {
+                if (MockFieldSupport.isMockableConstructorParamType(compilationUnitUnderTest, param.getType())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private List<String> collectMockedFieldNamesFromGeneratedTestClass() {
