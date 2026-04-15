@@ -115,6 +115,7 @@ public class UnitTestGenerator extends TestGenerator {
      * variables, it will be false.
      */
     private final Map<String, Boolean> variables = new HashMap<>();
+    private boolean variablesIdentified;
 
     /**
      * Maps simple type name → list of field names for non-mock protected/public fields declared in the
@@ -873,6 +874,7 @@ public class UnitTestGenerator extends TestGenerator {
     }
     
     private void identifyVariables() {
+        variablesIdentified = true;
         variables.clear();
         testMethod.accept(new VoidVisitorAdapter<Map<String, Boolean>>() {
             @Override
@@ -929,7 +931,7 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private boolean shouldSkipWhenScope(Expression scopeExpr) {
-        return mockedByBaseTestClass(scopeExpr) || (!variables.isEmpty() && !variables.containsKey(scopeExpr.toString()));
+        return mockedByBaseTestClass(scopeExpr) || (variablesIdentified && !variables.containsKey(scopeExpr.toString()));
     }
 
     /**
