@@ -83,7 +83,10 @@ final class ExceptionResponseAsserter {
 
         boolean reinstatedNpe = false;
         if (!willTrigger) {
-            if (!utg.hasWhenStubs()) {
+            boolean evaluatorInternalNpe = ctx.getException().getMessage() != null
+                    && ctx.getException().getMessage().contains("antikythera");
+            if (!utg.hasWhenStubs()
+                    && !(utg.hasBaseTestClass() && utg.hasFieldInjections() && evaluatorInternalNpe)) {
                 UnitTestGenerator.logger.info("Reinstating assertThrows(NPE) for {} — test has no stubs; plain @Mock returns null at runtime",
                         utg.methodUnderTest.getNameAsString());
                 willTrigger = true;

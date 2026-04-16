@@ -574,6 +574,31 @@ public class UnitTestGenerator extends TestGenerator {
         return hasNullReturn && !hasNonNullReturn;
     }
 
+    /**
+     * Returns true if a base test class is loaded, indicating that mock stubs
+     * may be provided by the base class (e.g. via setUpBase()) rather than
+     * in the test method itself.
+     */
+    boolean hasBaseTestClass() {
+        return baseTestClass != null;
+    }
+
+    /**
+     * Returns true if the setUp method injects at least one field via
+     * {@code ReflectionTestUtils.setField}. When fields are injected the
+     * service's dependencies are non-null mocks; NPE is unlikely because
+     * the base test class may provide stubs for those mocks.
+     */
+    boolean hasFieldInjections() {
+        for (MethodDeclaration md : testClass.getMethodsByName("setUp")) {
+            if (!md.findAll(MethodCallExpr.class,
+                    m -> m.getNameAsString().equals("setField")).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean hasThenThrowStubs() {
         return !testMethod.findAll(MethodCallExpr.class,
                 m -> m.getNameAsString().equals("thenThrow")).isEmpty();
