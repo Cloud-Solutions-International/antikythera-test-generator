@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests to verify that narrow numeric and char types are properly casted
  * in defaultExpressionForSimpleType and valueFieldInitializerLiteral methods
  */
-public class UnitTestGeneratorNarrowTypesTest {
+class UnitTestGeneratorNarrowTypesTest {
 
     private UnitTestGenerator generator;
     
@@ -30,12 +30,12 @@ public class UnitTestGeneratorNarrowTypesTest {
     }
     
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         generator = new UnitTestGenerator(StaticJavaParser.parse("public class TestClass {}"), GeneratorSeams.defaults());
     }
 
     @Test
-    public void testDefaultExpressionForSimpleType_byteTypes() throws Exception {
+    void testDefaultExpressionForSimpleType_byteTypes() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod("defaultExpressionForSimpleType", Type.class);
         method.setAccessible(true);
         
@@ -51,7 +51,7 @@ public class UnitTestGeneratorNarrowTypesTest {
     }
 
     @Test
-    public void testDefaultExpressionForSimpleType_shortTypes() throws Exception {
+    void testDefaultExpressionForSimpleType_shortTypes() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod("defaultExpressionForSimpleType", Type.class);
         method.setAccessible(true);
         
@@ -67,7 +67,7 @@ public class UnitTestGeneratorNarrowTypesTest {
     }
 
     @Test
-    public void testDefaultExpressionForSimpleType_charTypes() throws Exception {
+    void testDefaultExpressionForSimpleType_charTypes() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod("defaultExpressionForSimpleType", Type.class);
         method.setAccessible(true);
         
@@ -83,7 +83,7 @@ public class UnitTestGeneratorNarrowTypesTest {
     }
 
     @Test
-    public void testDefaultExpressionForSimpleType_intTypesUnchanged() throws Exception {
+    void testDefaultExpressionForSimpleType_intTypesUnchanged() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod("defaultExpressionForSimpleType", Type.class);
         method.setAccessible(true);
         
@@ -98,7 +98,7 @@ public class UnitTestGeneratorNarrowTypesTest {
     }
 
     @Test
-    public void testValueFieldInitializerLiteral_byteTypes() throws Exception {
+    void testValueFieldInitializerLiteral_byteTypes() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod("valueFieldInitializerLiteral", Type.class);
         method.setAccessible(true);
         
@@ -118,7 +118,7 @@ public class UnitTestGeneratorNarrowTypesTest {
     }
 
     @Test
-    public void testValueFieldInitializerLiteral_shortTypes() throws Exception {
+    void testValueFieldInitializerLiteral_shortTypes() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod("valueFieldInitializerLiteral", Type.class);
         method.setAccessible(true);
         
@@ -138,7 +138,7 @@ public class UnitTestGeneratorNarrowTypesTest {
     }
 
     @Test
-    public void testValueFieldInitializerLiteral_charTypes() throws Exception {
+    void testValueFieldInitializerLiteral_charTypes() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod("valueFieldInitializerLiteral", Type.class);
         method.setAccessible(true);
         
@@ -158,7 +158,7 @@ public class UnitTestGeneratorNarrowTypesTest {
     }
 
     @Test
-    public void testValueFieldInitializerLiteral_intTypesUnchanged() throws Exception {
+    void testValueFieldInitializerLiteral_intTypesUnchanged() throws Exception {
         Method method = UnitTestGenerator.class.getDeclaredMethod("valueFieldInitializerLiteral", Type.class);
         method.setAccessible(true);
         

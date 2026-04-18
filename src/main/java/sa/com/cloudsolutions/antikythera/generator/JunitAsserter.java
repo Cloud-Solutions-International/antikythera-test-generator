@@ -41,22 +41,37 @@ public class JunitAsserter extends Asserter {
     public Expression assertThrows(String invocation, MethodResponse response) {
         MethodCallExpr assertThrows = new MethodCallExpr("assertThrows");
         Throwable ex = response.getException();
-        String exceptionClass;
+        String exceptionClass = determineExceptionClass(ex);
+        exceptionClass = handleNumericComparatorException(ex, exceptionClass);
+        
+        if (shouldSuppressAssertThrows(exceptionClass)) {
+            return assertDoesNotThrow(invocation.replace(';', ' '));
+        }
+        
+        assertThrows.addArgument(exceptionClass + ".class");
+        assertThrows.addArgument(String.format("() -> %s", invocation.replace(';', ' ')));
+        return assertThrows;
+    }
+
+    private String determineExceptionClass(Throwable ex) {
         if (ex == null) {
-            exceptionClass = RuntimeException.class.getName();
-        } else if (ex.getCause() != null) {
+            return RuntimeException.class.getName();
+        }
+        if (ex.getCause() != null) {
             Throwable cause = ex.getCause();
             while (isWrapperException(cause) && cause.getCause() != null) {
                 cause = cause.getCause();
             }
-            exceptionClass = isWrapperException(cause) ? Exception.class.getName() : cause.getClass().getName();
-        } else {
-            Throwable actual = ex;
-            while (isWrapperException(actual) && actual.getCause() != null) {
-                actual = actual.getCause();
-            }
-            exceptionClass = isWrapperException(actual) ? Exception.class.getName() : actual.getClass().getName();
+            return isWrapperException(cause) ? Exception.class.getName() : cause.getClass().getName();
         }
+        Throwable actual = ex;
+        while (isWrapperException(actual) && actual.getCause() != null) {
+            actual = actual.getCause();
+        }
+        return isWrapperException(actual) ? Exception.class.getName() : actual.getClass().getName();
+    }
+
+    private String handleNumericComparatorException(Throwable ex, String exceptionClass) {
         /*
          * NumericComparator used to throw IllegalArgumentException("Cannot compare X and null") while the
          * JVM throws NullPointerException from Comparable.compareTo(null) or from null Date.toInstant().
@@ -67,15 +82,19 @@ public class JunitAsserter extends Asserter {
             String msg = iae.getMessage();
             boolean numericComparatorNullOperand = msg != null && msg.contains("Cannot compare") && msg.contains("null");
             if (numericComparatorNullOperand) {
-                exceptionClass = NullPointerException.class.getName();
+                return NullPointerException.class.getName();
             }
         }
+        return exceptionClass;
+    }
+
+    private boolean shouldSuppressAssertThrows(String exceptionClass) {
         /*
          * Gson failures are sensitive to mock depth; symbolic evaluation may predict JsonIOException
          * while a well-stubbed test runs cleanly. Prefer assertDoesNotThrow for Gson-related types.
          */
         if (exceptionClass.contains("JsonIOException") || exceptionClass.contains("gson.JsonSyntaxException")) {
-            return assertDoesNotThrow(invocation.replace(';', ' '));
+            return true;
         }
         /*
          * FatalBeanException from BeanUtils.copyProperties is an evaluation artifact: the evaluator
@@ -83,11 +102,9 @@ public class JunitAsserter extends Asserter {
          * instances work fine. Suppress the false-positive assertThrows.
          */
         if (exceptionClass.contains("FatalBeanException") || exceptionClass.startsWith("org.springframework.beans.")) {
-            return assertDoesNotThrow(invocation.replace(';', ' '));
+            return true;
         }
-        assertThrows.addArgument(exceptionClass + ".class");
-        assertThrows.addArgument(String.format("() -> %s", invocation.replace(';', ' ')));
-        return assertThrows;
+        return false;
     }
 
     private static boolean isWrapperException(Throwable throwable) {

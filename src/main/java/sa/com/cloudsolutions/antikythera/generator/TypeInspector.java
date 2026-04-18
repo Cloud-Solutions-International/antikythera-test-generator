@@ -7,6 +7,12 @@ import com.github.javaparser.ast.type.Type;
  */
 public final class TypeInspector {
 
+    private static final String ARRAY_LIST = "ArrayList";
+    private static final String COLLECTION = "Collection";
+    private static final String HASH_SET = "HashSet";
+    private static final String LINKED_LIST = "LinkedList";
+    private static final String LINKED_HASH_SET = "LinkedHashSet";
+
     private TypeInspector() {
     }
 
@@ -25,8 +31,8 @@ public final class TypeInspector {
             return false;
         }
         String raw = rawSimpleName(type);
-        return raw.equals("List") || raw.equals("ArrayList") || raw.equals("Collection")
-                || raw.equals("Set") || raw.equals("HashSet");
+        return raw.equals("List") || raw.equals(ARRAY_LIST) || raw.equals(COLLECTION)
+                || raw.equals("Set") || raw.equals(HASH_SET);
     }
 
     /**
@@ -34,9 +40,9 @@ public final class TypeInspector {
      */
     public static boolean isCollectionOrMapFieldType(Type type) {
         String raw = rawSimpleName(type);
-        return raw.equals("List") || raw.equals("ArrayList") || raw.equals("LinkedList")
-                || raw.equals("Set") || raw.equals("HashSet") || raw.equals("LinkedHashSet")
-                || raw.equals("Collection") || raw.equals("Map") || raw.equals("HashMap")
+        return raw.equals("List") || raw.equals(ARRAY_LIST) || raw.equals(LINKED_LIST)
+                || raw.equals("Set") || raw.equals(HASH_SET) || raw.equals(LINKED_HASH_SET)
+                || raw.equals(COLLECTION) || raw.equals("Map") || raw.equals("HashMap")
                 || raw.equals("LinkedHashMap");
     }
 
@@ -45,9 +51,9 @@ public final class TypeInspector {
      */
     public static boolean isCollectionType(Type type) {
         String raw = rawSimpleName(type);
-        return raw.equals("List") || raw.equals("ArrayList") || raw.equals("LinkedList")
-                || raw.equals("Set") || raw.equals("HashSet") || raw.equals("LinkedHashSet")
-                || raw.equals("Collection");
+        return raw.equals("List") || raw.equals(ARRAY_LIST) || raw.equals(LINKED_LIST)
+                || raw.equals("Set") || raw.equals(HASH_SET) || raw.equals(LINKED_HASH_SET)
+                || raw.equals(COLLECTION);
     }
 
     public static boolean isMapType(Type type) {
@@ -67,12 +73,12 @@ public final class TypeInspector {
             return false;
         }
         String simple = type.asClassOrInterfaceType().getNameAsString();
-        if (simple.contains("ArrayList") || simple.contains("LinkedList") || simple.contains("HashSet")
-                || simple.contains("TreeSet") || simple.contains("LinkedHashSet")) {
+        if (simple.contains(ARRAY_LIST) || simple.contains(LINKED_LIST) || simple.contains(HASH_SET)
+                || simple.contains("TreeSet") || simple.contains(LINKED_HASH_SET)) {
             return true;
         }
         String raw = rawSimpleName(type);
-        return raw.equals("List") || raw.equals("ArrayList") || raw.equals("Collection")
-                || raw.equals("Set") || raw.equals("HashSet");
+        return raw.equals("List") || raw.equals(ARRAY_LIST) || raw.equals(COLLECTION)
+                || raw.equals("Set") || raw.equals(HASH_SET);
     }
 }

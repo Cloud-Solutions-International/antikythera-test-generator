@@ -126,7 +126,40 @@ public final class TargetClassifier {
             ClassOrInterfaceDeclaration cdecl) {
         CompilationUnit cu = cdecl.findCompilationUnit().orElse(null);
 
-        // --- 1. Structural (Feign before generic INTERFACE) ---
+        ClassificationResult structuralResult = checkStructuralClassification(tw, cdecl, cu);
+        if (structuralResult != null) {
+            return structuralResult;
+        }
+
+        ClassificationResult webResult = checkWebClassification(tw, cdecl);
+        if (webResult != null) {
+            return webResult;
+        }
+
+        ClassificationResult persistenceResult = checkPersistenceClassification(tw, cdecl, cu);
+        if (persistenceResult != null) {
+            return persistenceResult;
+        }
+
+        ClassificationResult wiringResult = checkApplicationWiringClassification(tw, cdecl);
+        if (wiringResult != null) {
+            return wiringResult;
+        }
+
+        ClassificationResult aopResult = checkAopClassification(cdecl);
+        if (aopResult != null) {
+            return aopResult;
+        }
+
+        ClassificationResult dataCarrierResult = checkDataCarrierClassification(cdecl);
+        if (dataCarrierResult != null) {
+            return dataCarrierResult;
+        }
+
+        return ClassificationResult.skip(SkipReason.NO_TESTABLE_METHODS, "No testable instance logic found");
+    }
+
+    private static ClassificationResult checkStructuralClassification(TypeWrapper tw, ClassOrInterfaceDeclaration cdecl, CompilationUnit cu) {
         if (cdecl.isInterface()) {
             if (cdecl.isAnnotationPresent("FeignClient")
                     || cdecl.isAnnotationPresent("org.springframework.cloud.openfeign.FeignClient")) {
@@ -146,7 +179,10 @@ public final class TargetClassifier {
             return ClassificationResult.skip(SkipReason.PRIVATE_INNER_CLASS, "Private nested type not reachable from tests");
         }
 
-        // --- 2. Spring MVC / web ---
+        return null;
+    }
+
+    private static ClassificationResult checkWebClassification(TypeWrapper tw, ClassOrInterfaceDeclaration cdecl) {
         if (tw.isController()) {
             return ClassificationResult.skip(SkipReason.CONTROLLER, "Web controller");
         }
@@ -159,8 +195,10 @@ public final class TargetClassifier {
         if (extendsResponseEntityExceptionHandler(cdecl)) {
             return ClassificationResult.skip(SkipReason.CONTROLLER_ADVICE, "Extends ResponseEntityExceptionHandler");
         }
+        return null;
+    }
 
-        // --- 3. Persistence ---
+    private static ClassificationResult checkPersistenceClassification(TypeWrapper tw, ClassOrInterfaceDeclaration cdecl, CompilationUnit cu) {
         if (EntityMappingResolver.isEntity(tw)) {
             return ClassificationResult.skip(SkipReason.ENTITY, "JPA entity");
         }
@@ -184,8 +222,10 @@ public final class TargetClassifier {
             return ClassificationResult.skip(SkipReason.SPRING_DATA_REPOSITORY,
                     "Spring Data repository stub with no custom implementation methods");
         }
+        return null;
+    }
 
-        // --- 4. Application wiring ---
+    private static ClassificationResult checkApplicationWiringClassification(TypeWrapper tw, ClassOrInterfaceDeclaration cdecl) {
         if (cdecl.isAnnotationPresent("SpringBootApplication")
                 || cdecl.isAnnotationPresent("org.springframework.boot.autoconfigure.SpringBootApplication")) {
             return ClassificationResult.skip(SkipReason.SPRING_BOOT_APPLICATION, "Spring Boot application entry");
@@ -196,13 +236,17 @@ public final class TargetClassifier {
         if (hasPublicStaticMain(cdecl)) {
             return ClassificationResult.skip(SkipReason.MAIN_CLASS, "Application entry point (public static void main)");
         }
+        return null;
+    }
 
-        // --- 5. AOP ---
+    private static ClassificationResult checkAopClassification(ClassOrInterfaceDeclaration cdecl) {
         if (cdecl.isAnnotationPresent("Aspect") || cdecl.isAnnotationPresent("org.aspectj.lang.annotation.Aspect")) {
             return ClassificationResult.skip(SkipReason.AOP_ASPECT, "Aspect");
         }
+        return null;
+    }
 
-        // --- 6–8. Constants, exceptions, data carriers ---
+    private static ClassificationResult checkDataCarrierClassification(ClassOrInterfaceDeclaration cdecl) {
         if (isConstantOnlyHolder(cdecl)) {
             return ClassificationResult.skip(SkipReason.CONSTANT_CLASS, "Only constants or passive static members");
         }
@@ -224,8 +268,7 @@ public final class TargetClassifier {
                 && cdecl.getConstructors().stream().allMatch(TargetClassifier::isTrivialConstructor)) {
             return ClassificationResult.skip(SkipReason.DATA_CARRIER_BY_STRUCTURE, "Only boilerplate accessors and trivial constructors");
         }
-
-        return ClassificationResult.skip(SkipReason.NO_TESTABLE_METHODS, "No testable instance logic found");
+        return null;
     }
 
     private static boolean extendsResponseEntityExceptionHandler(ClassOrInterfaceDeclaration cdecl) {
@@ -271,34 +314,28 @@ public final class TargetClassifier {
     }
 
     private static boolean hasPublicStaticMain(ClassOrInterfaceDeclaration cdecl) {
-        for (MethodDeclaration m : cdecl.getMethods()) {
-            if (!m.isPublic() || !m.isStatic()) {
-                continue;
-            }
-            if (!"main".equals(m.getNameAsString())) {
-                continue;
-            }
-            if (!m.getType().isVoidType()) {
-                continue;
-            }
-            if (m.getParameters().size() != 1) {
-                continue;
-            }
-            Parameter p = m.getParameter(0);
-            String ptype = p.getType().asString();
-            
-            // Check for array form: String[] or java.lang.String[]
-            boolean isArrayForm = ptype.endsWith("String[]") || ptype.endsWith("java.lang.String[]");
-            
-            // Check for varargs form: String... 
-            boolean isVarargsForm = p.isVarArgs() && 
-                    (ptype.equals("String") || ptype.equals("java.lang.String"));
-            
-            if (isArrayForm || isVarargsForm) {
-                return true;
-            }
+        return cdecl.getMethods().stream().anyMatch(TargetClassifier::isPublicStaticMainMethod);
+    }
+
+    private static boolean isPublicStaticMainMethod(MethodDeclaration m) {
+        if (!m.isPublic() || !m.isStatic()) {
+            return false;
         }
-        return false;
+        if (!"main".equals(m.getNameAsString())) {
+            return false;
+        }
+        if (!m.getType().isVoidType()) {
+            return false;
+        }
+        if (m.getParameters().size() != 1) {
+            return false;
+        }
+        Parameter p = m.getParameter(0);
+        String ptype = p.getType().asString();
+        boolean isArrayForm = ptype.endsWith("String[]") || ptype.endsWith("java.lang.String[]");
+        boolean isVarargsForm = p.isVarArgs()
+                && (ptype.equals("String") || ptype.equals("java.lang.String"));
+        return isArrayForm || isVarargsForm;
     }
 
     private static boolean isConstantOnlyHolder(ClassOrInterfaceDeclaration cdecl) {

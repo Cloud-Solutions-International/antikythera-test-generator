@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Debug test for ExceptionAnalyzer to understand failures.
  */
-public class TestExceptionAnalyzerDebug {
+class TestExceptionAnalyzerDebug {
     
     @Test
     void debugEmptyCollectionDetection() {

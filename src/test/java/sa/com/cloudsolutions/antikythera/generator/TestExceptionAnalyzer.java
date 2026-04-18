@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Unit tests for ExceptionAnalyzer.
  */
-public class TestExceptionAnalyzer {
+class TestExceptionAnalyzer {
     
     private ExceptionAnalyzer analyzer;
     

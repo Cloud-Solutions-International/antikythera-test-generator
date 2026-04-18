@@ -8,10 +8,10 @@ import com.github.javaparser.ast.type.Type;
 /**
  * Tests to verify Map vs Collection type handling in TypeInspector
  */
-public class MapCollectionTypeTest {
+class MapCollectionTypeTest {
 
     @Test
-    public void testIsMapTypeCorrectlyIdentifiesMaps() {
+    void testIsMapTypeCorrectlyIdentifiesMaps() {
         Type mapType = StaticJavaParser.parseType("Map<String, String>");
         Type hashMapType = StaticJavaParser.parseType("HashMap<String, String>");
         Type linkedHashMapType = StaticJavaParser.parseType("LinkedHashMap<String, String>");
@@ -22,7 +22,7 @@ public class MapCollectionTypeTest {
     }
 
     @Test
-    public void testIsCollectionTypeExcludesMaps() {
+    void testIsCollectionTypeExcludesMaps() {
         Type mapType = StaticJavaParser.parseType("Map<String, String>");
         Type hashMapType = StaticJavaParser.parseType("HashMap<String, String>");
         Type linkedHashMapType = StaticJavaParser.parseType("LinkedHashMap<String, String>");
@@ -33,7 +33,7 @@ public class MapCollectionTypeTest {
     }
 
     @Test
-    public void testIsCollectionTypeCorrectlyIdentifiesCollections() {
+    void testIsCollectionTypeCorrectlyIdentifiesCollections() {
         Type listType = StaticJavaParser.parseType("List<String>");
         Type arrayListType = StaticJavaParser.parseType("ArrayList<String>");
         Type setType = StaticJavaParser.parseType("Set<String>");
@@ -48,7 +48,7 @@ public class MapCollectionTypeTest {
     }
 
     @Test
-    public void testIsCollectionOrMapFieldTypeIncludesBoth() {
+    void testIsCollectionOrMapFieldTypeIncludesBoth() {
         Type mapType = StaticJavaParser.parseType("Map<String, String>");
         Type listType = StaticJavaParser.parseType("List<String>");
         Type hashMapType = StaticJavaParser.parseType("HashMap<String, String>");

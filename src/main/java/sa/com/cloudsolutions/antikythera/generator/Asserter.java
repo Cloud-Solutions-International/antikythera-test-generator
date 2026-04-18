@@ -42,31 +42,35 @@ public abstract class Asserter {
             return;
         }
         TypeDeclaration<?> type = typeOpt.get();
-        for(FieldDeclaration field : type.getFields()) {
-            VariableDeclarator fieldVariable = field.getVariable(0);
-            try {
-                String fieldName = fieldVariable.getNameAsString();
-                Variable value = ev.getField(fieldName);
-
-                if (value != null && !fieldName.equals("serialVersionUID")
-                        && value.getValue() != null) {
-                    if (shouldSkipCollectionFieldAssertion(fieldVariable, value)) {
-                        continue;
-                    }
-
-                    String getter = findGetter(fieldName, type);
-                    if (getter != null) {
-                        body.addStatement(fieldAssertion(getter, value));
-                        i++;
-                    }
-                }
-            } catch (Exception pex) {
-                logger.error("Error asserting {}", fieldVariable.getNameAsString(), pex);
-            }
-            if (i == 5) {
+        for (FieldDeclaration field : type.getFields()) {
+            if (i >= 5) {
                 break;
             }
+            if (tryAddFieldAssertion(body, ev, type, field.getVariable(0))) {
+                i++;
+            }
         }
+    }
+
+    private boolean tryAddFieldAssertion(BlockStmt body, Evaluator ev, TypeDeclaration<?> type, VariableDeclarator fieldVariable) {
+        try {
+            String fieldName = fieldVariable.getNameAsString();
+            Variable value = ev.getField(fieldName);
+            if (value == null || fieldName.equals("serialVersionUID") || value.getValue() == null) {
+                return false;
+            }
+            if (shouldSkipCollectionFieldAssertion(fieldVariable, value)) {
+                return false;
+            }
+            String getter = findGetter(fieldName, type);
+            if (getter != null) {
+                body.addStatement(fieldAssertion(getter, value));
+                return true;
+            }
+        } catch (Exception pex) {
+            logger.error("Error asserting {}", fieldVariable.getNameAsString(), pex);
+        }
+        return false;
     }
 
     private boolean shouldSkipCollectionFieldAssertion(VariableDeclarator fieldVariable, Variable value) {

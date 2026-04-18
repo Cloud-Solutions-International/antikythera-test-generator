@@ -13,10 +13,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests to verify the hasPublicStaticMain method correctly handles both
  * array and varargs forms of main method parameters
  */
-public class TargetClassifierMainTest {
+class TargetClassifierMainTest {
 
     @Test
-    public void testHasPublicStaticMainWithStringArray() throws Exception {
+    void testHasPublicStaticMainWithStringArray() throws Exception {
         String code = """
             public class MainClass {
                 public static void main(String[] args) {
@@ -36,7 +36,7 @@ public class TargetClassifierMainTest {
     }
 
     @Test
-    public void testHasPublicStaticMainWithVarargs() throws Exception {
+    void testHasPublicStaticMainWithVarargs() throws Exception {
         String code = """
             public class MainClass {
                 public static void main(String... args) {
@@ -56,7 +56,7 @@ public class TargetClassifierMainTest {
     }
 
     @Test
-    public void testHasPublicStaticMainWithFullyQualifiedStringArray() throws Exception {
+    void testHasPublicStaticMainWithFullyQualifiedStringArray() throws Exception {
         String code = """
             public class MainClass {
                 public static void main(java.lang.String[] args) {
@@ -76,7 +76,7 @@ public class TargetClassifierMainTest {
     }
 
     @Test
-    public void testHasPublicStaticMainWithFullyQualifiedVarargs() throws Exception {
+    void testHasPublicStaticMainWithFullyQualifiedVarargs() throws Exception {
         String code = """
             public class MainClass {
                 public static void main(java.lang.String... args) {
@@ -96,7 +96,7 @@ public class TargetClassifierMainTest {
     }
 
     @Test
-    public void testHasPublicStaticMainRejectsNonVoidReturn() throws Exception {
+    void testHasPublicStaticMainRejectsNonVoidReturn() throws Exception {
         String code = """
             public class MainClass {
                 public static int main(String[] args) {
@@ -116,7 +116,7 @@ public class TargetClassifierMainTest {
     }
 
     @Test
-    public void testHasPublicStaticMainRejectsWrongParameterType() throws Exception {
+    void testHasPublicStaticMainRejectsWrongParameterType() throws Exception {
         String code = """
             public class MainClass {
                 public static void main(int[] args) {
@@ -136,7 +136,7 @@ public class TargetClassifierMainTest {
     }
 
     @Test
-    public void testHasPublicStaticMainRejectsNonStaticMethod() throws Exception {
+    void testHasPublicStaticMainRejectsNonStaticMethod() throws Exception {
         String code = """
             public class MainClass {
                 public void main(String[] args) {
@@ -156,7 +156,7 @@ public class TargetClassifierMainTest {
     }
 
     @Test
-    public void testHasPublicStaticMainRejectsNonPublicMethod() throws Exception {
+    void testHasPublicStaticMainRejectsNonPublicMethod() throws Exception {
         String code = """
             public class MainClass {
                 private static void main(String[] args) {

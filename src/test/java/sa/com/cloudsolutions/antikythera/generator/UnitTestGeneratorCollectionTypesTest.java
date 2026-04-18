@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Test that verifies collection type mapping in expandInlineDtoCollectionFields method
  */
-public class UnitTestGeneratorCollectionTypesTest {
+class UnitTestGeneratorCollectionTypesTest {
 
     private UnitTestGenerator generator;
     
@@ -29,19 +29,19 @@ public class UnitTestGeneratorCollectionTypesTest {
     }
     
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         generator = new UnitTestGenerator(StaticJavaParser.parse("public class TestClass {}"), GeneratorSeams.defaults());
         // Initialize testMethod to avoid null pointer exceptions
         generator.testMethod = generator.buildTestMethod(StaticJavaParser.parseMethodDeclaration("void testMethod() {}"));
     }
 
     @Test
-    public void testExpandInlineDtoCollectionFields_SetType() throws Exception {
+    void testExpandInlineDtoCollectionFields_SetType() throws Exception {
         // Create a class with a Set field
         String dtoClassCode = """
             package com.test;
             import java.util.Set;
-            public class TestDto {
+            class TestDto {
                 private Set<String> items;
                 public void setItems(Set<String> items) { this.items = items; }
                 public Set<String> getItems() { return items; }
@@ -74,11 +74,11 @@ public class UnitTestGeneratorCollectionTypesTest {
     }
 
     @Test
-    public void testExpandInlineDtoCollectionFields_MapType() throws Exception {
+    void testExpandInlineDtoCollectionFields_MapType() throws Exception {
         // Create a class with a Map field
         String dtoClassCode = """
             import java.util.Map;
-            public class TestDto {
+            class TestDto {
                 private Map<String, Integer> data;
                 public void setData(Map<String, Integer> data) { this.data = data; }
                 public Map<String, Integer> getData() { return data; }
@@ -112,11 +112,11 @@ public class UnitTestGeneratorCollectionTypesTest {
     }
 
     @Test
-    public void testExpandInlineDtoCollectionFields_LinkedListType() throws Exception {
+    void testExpandInlineDtoCollectionFields_LinkedListType() throws Exception {
         // Create a class with a LinkedList field
         String dtoClassCode = """
             import java.util.LinkedList;
-            public class TestDto {
+            class TestDto {
                 private LinkedList<String> items;
                 public void setItems(LinkedList<String> items) { this.items = items; }
                 public LinkedList<String> getItems() { return items; }
@@ -150,11 +150,11 @@ public class UnitTestGeneratorCollectionTypesTest {
     }
 
     @Test
-    public void testExpandInlineDtoCollectionFields_ListTypeUsesArrayList() throws Exception {
+    void testExpandInlineDtoCollectionFields_ListTypeUsesArrayList() throws Exception {
         // Create a class with a List field (should default to ArrayList)
         String dtoClassCode = """
             import java.util.List;
-            public class TestDto {
+            class TestDto {
                 private List<String> items;
                 public void setItems(List<String> items) { this.items = items; }
                 public List<String> getItems() { return items; }
@@ -188,11 +188,11 @@ public class UnitTestGeneratorCollectionTypesTest {
     }
 
     @Test
-    public void testExpandInlineDtoCollectionFields_LinkedHashSetType() throws Exception {
+    void testExpandInlineDtoCollectionFields_LinkedHashSetType() throws Exception {
         // Create a class with a LinkedHashSet field
         String dtoClassCode = """
             import java.util.LinkedHashSet;
-            public class TestDto {
+            class TestDto {
                 private LinkedHashSet<String> items;
                 public void setItems(LinkedHashSet<String> items) { this.items = items; }
                 public LinkedHashSet<String> getItems() { return items; }
@@ -226,11 +226,11 @@ public class UnitTestGeneratorCollectionTypesTest {
     }
 
     @Test
-    public void testExpandInlineDtoCollectionFields_LinkedHashMapType() throws Exception {
+    void testExpandInlineDtoCollectionFields_LinkedHashMapType() throws Exception {
         // Create a class with a LinkedHashMap field
         String dtoClassCode = """
             import java.util.LinkedHashMap;
-            public class TestDto {
+            class TestDto {
                 private LinkedHashMap<String, Integer> data;
                 public void setData(LinkedHashMap<String, Integer> data) { this.data = data; }
                 public LinkedHashMap<String, Integer> getData() { return data; }

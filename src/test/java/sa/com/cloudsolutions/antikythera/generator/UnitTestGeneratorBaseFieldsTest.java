@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests to verify the extractBaseClassFields and tryUseBaseClassField methods
  * handle multiple fields of the same type correctly
  */
-public class UnitTestGeneratorBaseFieldsTest {
+class UnitTestGeneratorBaseFieldsTest {
 
     private UnitTestGenerator generator;
     
@@ -34,15 +34,15 @@ public class UnitTestGeneratorBaseFieldsTest {
     }
     
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         CompilationUnit cu = StaticJavaParser.parse("public class TestClass {}");
         generator = new UnitTestGenerator(cu, GeneratorSeams.defaults());
     }
 
     @Test
-    public void testExtractBaseClassFields_collectsMultipleFieldsOfSameType() throws Exception {
+    void testExtractBaseClassFields_collectsMultipleFieldsOfSameType() throws Exception {
         String baseClass = """
-            public class BaseTest {
+            class BaseTest {
                 protected String tenant;
                 protected String mainTenant;
                 protected MetaData metaData;
@@ -91,7 +91,7 @@ public class UnitTestGeneratorBaseFieldsTest {
     }
 
     @Test
-    public void testTryUseBaseClassField_exactNameMatchPreferred() throws Exception {
+    void testTryUseBaseClassField_exactNameMatchPreferred() throws Exception {
         // Setup test method
         setupTestMethod();
         
@@ -124,7 +124,7 @@ public class UnitTestGeneratorBaseFieldsTest {
     }
 
     @Test
-    public void testTryUseBaseClassField_autoWireWhenUniqueType() throws Exception {
+    void testTryUseBaseClassField_autoWireWhenUniqueType() throws Exception {
         // Setup test method
         setupTestMethod();
         
@@ -155,7 +155,7 @@ public class UnitTestGeneratorBaseFieldsTest {
     }
 
     @Test
-    public void testTryUseBaseClassField_rejectsMultipleCandidatesWithoutExactMatch() throws Exception {
+    void testTryUseBaseClassField_rejectsMultipleCandidatesWithoutExactMatch() throws Exception {
         // Setup test method
         setupTestMethod();
         
@@ -186,7 +186,7 @@ public class UnitTestGeneratorBaseFieldsTest {
     }
 
     @Test
-    public void testTryUseBaseClassField_rejectsNonExistentType() throws Exception {
+    void testTryUseBaseClassField_rejectsNonExistentType() throws Exception {
         // Setup test method
         setupTestMethod();
         
