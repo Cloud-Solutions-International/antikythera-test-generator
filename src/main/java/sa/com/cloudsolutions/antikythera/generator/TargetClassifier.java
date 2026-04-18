@@ -126,7 +126,7 @@ public final class TargetClassifier {
             ClassOrInterfaceDeclaration cdecl) {
         CompilationUnit cu = cdecl.findCompilationUnit().orElse(null);
 
-        ClassificationResult structuralResult = checkStructuralClassification(tw, cdecl, cu);
+        ClassificationResult structuralResult = checkStructuralClassification(cdecl);
         if (structuralResult != null) {
             return structuralResult;
         }
@@ -159,7 +159,7 @@ public final class TargetClassifier {
         return ClassificationResult.skip(SkipReason.NO_TESTABLE_METHODS, "No testable instance logic found");
     }
 
-    private static ClassificationResult checkStructuralClassification(TypeWrapper tw, ClassOrInterfaceDeclaration cdecl, CompilationUnit cu) {
+    private static ClassificationResult checkStructuralClassification(ClassOrInterfaceDeclaration cdecl) {
         if (cdecl.isInterface()) {
             if (cdecl.isAnnotationPresent("FeignClient")
                     || cdecl.isAnnotationPresent("org.springframework.cloud.openfeign.FeignClient")) {
@@ -470,15 +470,11 @@ public final class TargetClassifier {
         if (body == null) {
             return true;
         }
-        for (Statement st : body.getStatements()) {
-            if (st.isExplicitConstructorInvocationStmt()) {
-                continue;
-            }
-            if (st.isExpressionStmt() && st.asExpressionStmt().getExpression().isAssignExpr()) {
-                continue;
-            }
-            return false;
-        }
-        return true;
+        return body.getStatements().stream().allMatch(TargetClassifier::isConstructorOrAssignment);
+    }
+
+    private static boolean isConstructorOrAssignment(Statement st) {
+        return st.isExplicitConstructorInvocationStmt()
+                || (st.isExpressionStmt() && st.asExpressionStmt().getExpression().isAssignExpr());
     }
 }

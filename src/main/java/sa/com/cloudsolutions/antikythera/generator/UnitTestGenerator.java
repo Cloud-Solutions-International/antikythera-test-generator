@@ -111,6 +111,20 @@ public class UnitTestGenerator extends TestGenerator {
     private static final String JAVA_UTIL_SET = "java.util.Set";
     private static final String MOCKITO = "Mockito";
     private static final String STRING_TYPE = "String";
+    private static final String INTEGER_TYPE = "Integer";
+    private static final String LONG_TYPE = "Long";
+    private static final String BOOLEAN_TYPE = "Boolean";
+    private static final String DOUBLE_TYPE = "Double";
+    private static final String FLOAT_TYPE = "Float";
+    private static final String BYTE_TYPE = "Byte";
+    private static final String SHORT_TYPE = "Short";
+    private static final String CHARACTER_TYPE = "Character";
+    private static final String SHORT_ZERO = "(short)0";
+    private static final String BYTE_ZERO = "(byte)0";
+    private static final String FALSE_LITERAL = "false";
+    private static final String NULL_CHAR_LITERAL = "'\\0'";
+    private static final String LIST_OF_PREFIX = "List.of(";
+    private static final String SET_OF_PREFIX = "Set.of(";
 
     private final String filePath;
 
@@ -494,24 +508,26 @@ public class UnitTestGenerator extends TestGenerator {
         }
 
         for (Parameter param : methodUnderTest.getParameters()) {
-            if (!TypeInspector.isCollectionParameterType(param.getType())) {
-                continue;
-            }
-            String name = param.getNameAsString();
-            Expression initializer = currentArgs.get(name);
-            if (initializer == null || !CollectionExpressionAnalyzer.isDefinitelyEmptyCollection(initializer)) {
-                continue;
-            }
-
-            Expression replacement = buildNonEmptyCollectionInitializer(param);
-            if (replacement == null) {
-                continue;
-            }
-
-            replaceInitializer(testMethod, name, replacement);
-            logger.info("Replaced empty collection argument '{}' with a non-empty invalid sample to preserve exception-path coverage",
-                    name);
+            trySeedCollectionArgument(param, currentArgs);
         }
+    }
+
+    private void trySeedCollectionArgument(Parameter param, Map<String, Expression> currentArgs) {
+        if (!TypeInspector.isCollectionParameterType(param.getType())) {
+            return;
+        }
+        String name = param.getNameAsString();
+        Expression initializer = currentArgs.get(name);
+        if (initializer == null || !CollectionExpressionAnalyzer.isDefinitelyEmptyCollection(initializer)) {
+            return;
+        }
+        Expression replacement = buildNonEmptyCollectionInitializer(param);
+        if (replacement == null) {
+            return;
+        }
+        replaceInitializer(testMethod, name, replacement);
+        logger.info("Replaced empty collection argument '{}' with a non-empty invalid sample to preserve exception-path coverage",
+                name);
     }
 
     private Expression buildNonEmptyCollectionInitializer(Parameter param) {
@@ -539,7 +555,7 @@ public class UnitTestGenerator extends TestGenerator {
 
         String rawCollectionType = TypeInspector.rawSimpleName(param.getType());
         String collectionInitializer = switch (rawCollectionType) {
-            case "Set", "HashSet" -> "new java.util.HashSet<" + elementTypeName + ">(java.util.List.of(" + elementInitializer + "))";
+            case "Set", HASH_SET -> "new java.util.HashSet<" + elementTypeName + ">(java.util.List.of(" + elementInitializer + "))";
             default -> "new java.util.ArrayList<" + elementTypeName + ">(java.util.List.of(" + elementInitializer + "))";
         };
         return StaticJavaParser.parseExpression(collectionInitializer);
@@ -770,15 +786,19 @@ public class UnitTestGenerator extends TestGenerator {
         }
         CompilationUnit cu = cuOpt.orElseThrow();
         for (ObjectCreationExpr oce : expr.findAll(ObjectCreationExpr.class)) {
-            if (oce.getArguments().isEmpty() || oce.getArguments().stream().noneMatch(Expression::isNullLiteralExpr)) {
-                continue;
-            }
-            List<Type> parameterTypes = resolveSimpleConstructorParameterTypes(cu, oce);
-            if (parameterTypes == null) {
-                continue;
-            }
-            replaceNullArgumentsWithDefaults(oce, parameterTypes);
+            tryReplaceNullArguments(cu, oce);
         }
+    }
+
+    private void tryReplaceNullArguments(CompilationUnit cu, ObjectCreationExpr oce) {
+        if (oce.getArguments().isEmpty() || oce.getArguments().stream().noneMatch(Expression::isNullLiteralExpr)) {
+            return;
+        }
+        List<Type> parameterTypes = resolveSimpleConstructorParameterTypes(cu, oce);
+        if (parameterTypes == null) {
+            return;
+        }
+        replaceNullArgumentsWithDefaults(oce, parameterTypes);
     }
 
     private List<Type> resolveSimpleConstructorParameterTypes(CompilationUnit cu, ObjectCreationExpr oce) {
@@ -834,7 +854,7 @@ public class UnitTestGenerator extends TestGenerator {
         }
         String simpleName = type.asClassOrInterfaceType().getNameAsString();
         return switch (simpleName) {
-            case "String", "Integer", "Long", "Boolean", "Double", "Float", "Byte", "Short", "Character" -> true;
+            case STRING_TYPE, INTEGER_TYPE, LONG_TYPE, BOOLEAN_TYPE, DOUBLE_TYPE, FLOAT_TYPE, BYTE_TYPE, SHORT_TYPE, CHARACTER_TYPE -> true;
             default -> false;
         };
     }
@@ -844,14 +864,14 @@ public class UnitTestGenerator extends TestGenerator {
                 ? type.asClassOrInterfaceType().getNameAsString()
                 : type.asString();
         return switch (simpleName) {
-            case "String" -> new StringLiteralExpr("0");
-            case "Long", "long" -> new LongLiteralExpr("0L");
-            case "Integer", "int" -> new IntegerLiteralExpr("0");
-            case "Boolean", "boolean" -> new BooleanLiteralExpr(false);
-            case "Double", "double", "Float", "float" -> StaticJavaParser.parseExpression("0.0");
-            case "Short", "short" -> StaticJavaParser.parseExpression("(short)0");
-            case "Byte", "byte" -> StaticJavaParser.parseExpression("(byte)0");
-            case "Character", "char" -> StaticJavaParser.parseExpression("'\\u0000'");
+            case STRING_TYPE -> new StringLiteralExpr("0");
+            case LONG_TYPE, "long" -> new LongLiteralExpr("0L");
+            case INTEGER_TYPE, "int" -> new IntegerLiteralExpr("0");
+            case BOOLEAN_TYPE, "boolean" -> new BooleanLiteralExpr(false);
+            case DOUBLE_TYPE, "double", FLOAT_TYPE, "float" -> StaticJavaParser.parseExpression("0.0");
+            case SHORT_TYPE, "short" -> StaticJavaParser.parseExpression(SHORT_ZERO);
+            case BYTE_TYPE, "byte" -> StaticJavaParser.parseExpression(BYTE_ZERO);
+            case CHARACTER_TYPE, "char" -> StaticJavaParser.parseExpression("'\\u0000'");
             default -> {
                 Object defaultValue = Reflect.getDefault(simpleName);
                 yield defaultValue != null ? Reflect.createLiteralExpression(defaultValue) : null;
@@ -1169,14 +1189,14 @@ public class UnitTestGenerator extends TestGenerator {
         String typeName = paramType.asString();
 
         switch (typeName) {
-            case "int", "Integer" -> v.setInitializer("0");
-            case "long", "Long" -> v.setInitializer("0L");
-            case "double", "Double" -> v.setInitializer("0.0");
-            case "float", "Float" -> v.setInitializer("0.0f");
-            case "boolean", "Boolean" -> v.setInitializer("false");
-            case "char", "Character" -> v.setInitializer("'\\0'");
-            case "byte", "Byte" -> v.setInitializer("(byte)0");
-            case "short", "Short" -> v.setInitializer("(short)0");
+            case "int", INTEGER_TYPE -> v.setInitializer("0");
+            case "long", LONG_TYPE -> v.setInitializer("0L");
+            case "double", DOUBLE_TYPE -> v.setInitializer("0.0");
+            case "float", FLOAT_TYPE -> v.setInitializer("0.0f");
+            case "boolean", BOOLEAN_TYPE -> v.setInitializer(FALSE_LITERAL);
+            case "char", CHARACTER_TYPE -> v.setInitializer(NULL_CHAR_LITERAL);
+            case "byte", BYTE_TYPE -> v.setInitializer(BYTE_ZERO);
+            case "short", SHORT_TYPE -> v.setInitializer(SHORT_ZERO);
             default -> v.setInitializer("null");
         }
 
@@ -1439,8 +1459,8 @@ public class UnitTestGenerator extends TestGenerator {
 
     private boolean looksLikeCollectionExpression(Expression expression) {
         String text = expression.toString();
-        return text.contains("List.of(")
-                || text.contains("Set.of(")
+        return text.contains(LIST_OF_PREFIX)
+                || text.contains(SET_OF_PREFIX)
                 || text.contains("Arrays.asList(")
                 || text.contains("Collections.singletonList(")
                 || text.contains("Collections.singleton(")
@@ -1549,35 +1569,24 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private void normalizeMockitoThenReturnCollectionElementType(MethodCallExpr raw) {
-        if (!"thenReturn".equals(raw.getNameAsString()) || raw.getArguments().isEmpty()) {
+        if (!THEN_RETURN.equals(raw.getNameAsString()) || raw.getArguments().isEmpty()) {
             return;
         }
         Expression returnExpr = raw.getArgument(0);
         if (!(returnExpr instanceof ObjectCreationExpr oce) || oce.getArguments().size() != 1) {
             return;
         }
-        String createdType = oce.getTypeAsString();
-        if (!createdType.contains("ArrayList") && !createdType.contains("HashSet") && !createdType.contains("LinkedList")) {
+        if (!isSupportedCollectionType(oce.getTypeAsString())) {
             return;
         }
         Expression seedExpr = oce.getArgument(0);
         if (!(seedExpr instanceof MethodCallExpr seedCall) || seedCall.getArguments().size() != 1) {
             return;
         }
-        String seedText = seedCall.toString();
-        if (!(seedText.startsWith("java.util.List.of(")
-                || seedText.startsWith("List.of(")
-                || seedText.startsWith("java.util.Set.of(")
-                || seedText.startsWith("Set.of("))) {
+        if (!isSupportedSeedCall(seedCall.toString())) {
             return;
         }
-        Expression elementExpr = seedCall.getArgument(0);
-        if (!(elementExpr.isIntegerLiteralExpr()
-                || elementExpr.isLongLiteralExpr()
-                || elementExpr.isDoubleLiteralExpr()
-                || elementExpr.isStringLiteralExpr()
-                || elementExpr.isBooleanLiteralExpr()
-                || elementExpr.isCharLiteralExpr())) {
+        if (!isPrimitiveLiteralExpression(seedCall.getArgument(0))) {
             return;
         }
 
@@ -1593,6 +1602,26 @@ public class UnitTestGenerator extends TestGenerator {
         if (replacement != null) {
             seedCall.setArgument(0, replacement);
         }
+    }
+
+    private static boolean isSupportedCollectionType(String createdType) {
+        return createdType.contains("ArrayList") || createdType.contains("HashSet") || createdType.contains("LinkedList");
+    }
+
+    private static boolean isSupportedSeedCall(String seedText) {
+        return seedText.startsWith("java.util.List.of(")
+                || seedText.startsWith(LIST_OF_PREFIX)
+                || seedText.startsWith("java.util.Set.of(")
+                || seedText.startsWith(SET_OF_PREFIX);
+    }
+
+    private static boolean isPrimitiveLiteralExpression(Expression expr) {
+        return expr.isIntegerLiteralExpr()
+                || expr.isLongLiteralExpr()
+                || expr.isDoubleLiteralExpr()
+                || expr.isStringLiteralExpr()
+                || expr.isBooleanLiteralExpr()
+                || expr.isCharLiteralExpr();
     }
 
     private String resolveCollectionElementTypeName(MethodCallExpr whenArgument) {
@@ -1630,7 +1659,7 @@ public class UnitTestGenerator extends TestGenerator {
 
     private Expression createCollectionElementExpression(String elementTypeName) {
         String normalizedType = elementTypeName.replace("? extends ", "").replace("? super ", "").trim();
-        if (normalizedType.endsWith("[]") || normalizedType.contains("<") || normalizedType.startsWith("java.lang.")) {
+        if (normalizedType.endsWith("[]") || normalizedType.contains("<") || normalizedType.startsWith(JAVA_LANG_PREFIX)) {
             return null;
         }
         GeneratorState.addImport(new ImportDeclaration(normalizedType, false, false));
@@ -1793,7 +1822,7 @@ public class UnitTestGenerator extends TestGenerator {
                 .filter(Expression::isNameExpr)
                 .map(Expression::asNameExpr)
                 .map(NameExpr::getNameAsString)
-                .filter("Mockito"::equals)
+                .filter(MOCKITO::equals)
                 .isPresent();
     }
 
@@ -2318,22 +2347,20 @@ public class UnitTestGenerator extends TestGenerator {
      */
     private void injectValueFieldsViaReflection(BlockStmt beforeBody, ClassOrInterfaceDeclaration bean,
                                                 String serviceInstanceName) {
-        for (var member : bean.getMembers()) {
-            if (!(member instanceof FieldDeclaration fd)) {
-                continue;
-            }
-            if (fd.isStatic() || fd.hasModifier(Modifier.Keyword.FINAL)) {
-                continue;
-            }
-            if (!isSpringFieldValueAnnotation(fd)) {
-                continue;
-            }
-            for (VariableDeclarator varDeclarator : fd.getVariables()) {
-                valueFieldInitializerLiteral(fd.getElementType()).ifPresent(init ->
-                        beforeBody.addStatement(String.format(
-                                TestGenerationConstants.REFLECTION_TEST_UTILS_SIMPLE_NAME + ".setField(%s, \"%s\", %s);",
-                                serviceInstanceName, varDeclarator.getNameAsString(), init)));
-            }
+        bean.getMembers().stream()
+                .filter(FieldDeclaration.class::isInstance)
+                .map(FieldDeclaration.class::cast)
+                .filter(fd -> !fd.isStatic() && !fd.hasModifier(Modifier.Keyword.FINAL))
+                .filter(UnitTestGenerator::isSpringFieldValueAnnotation)
+                .forEach(fd -> injectValueFieldVariables(beforeBody, serviceInstanceName, fd));
+    }
+
+    private void injectValueFieldVariables(BlockStmt beforeBody, String serviceInstanceName, FieldDeclaration fd) {
+        for (VariableDeclarator varDeclarator : fd.getVariables()) {
+            valueFieldInitializerLiteral(fd.getElementType()).ifPresent(init ->
+                    beforeBody.addStatement(String.format(
+                            TestGenerationConstants.REFLECTION_TEST_UTILS_SIMPLE_NAME + ".setField(%s, \"%s\", %s);",
+                            serviceInstanceName, varDeclarator.getNameAsString(), init)));
         }
     }
 
@@ -2363,15 +2390,15 @@ public class UnitTestGenerator extends TestGenerator {
         if (type.isClassOrInterfaceType()) {
             String name = type.asClassOrInterfaceType().getNameAsString();
             return Optional.ofNullable(switch (name) {
-                case "Integer" -> "0";
-                case "Byte" -> "(byte)0";
-                case "Short" -> "(short)0";
-                case "Long" -> "0L";
-                case "Boolean" -> "false";
-                case "Character" -> "'\\0'";
-                case "Double" -> "0.0";
-                case "Float" -> "0.0f";
-                case "String" -> "\"\"";
+                case INTEGER_TYPE -> "0";
+                case BYTE_TYPE -> BYTE_ZERO;
+                case SHORT_TYPE -> SHORT_ZERO;
+                case LONG_TYPE -> "0L";
+                case BOOLEAN_TYPE -> FALSE_LITERAL;
+                case CHARACTER_TYPE -> NULL_CHAR_LITERAL;
+                case DOUBLE_TYPE -> "0.0";
+                case FLOAT_TYPE -> "0.0f";
+                case STRING_TYPE -> "\"\"";
                 default -> null;
             });
         }
@@ -2386,7 +2413,7 @@ public class UnitTestGenerator extends TestGenerator {
         MethodDeclaration before = new MethodDeclaration();
         before.setType(void.class);
         before.addAnnotation("BeforeEach");
-        before.setName("setUp");
+        before.setName(SET_UP);
         BlockStmt beforeBody = new BlockStmt();
         before.setBody(beforeBody);
         beforeBody.addStatement("MockitoAnnotations.openMocks(this);");
@@ -2522,11 +2549,8 @@ public class UnitTestGenerator extends TestGenerator {
     }
 
     private static boolean isTypeCompatible(Expression value, String typeName) {
-        if (value instanceof StringLiteralExpr
-                && !typeName.equals("String") && !typeName.equals("java.lang.String")) {
-            return false;
-        }
-        return true;
+        return !(value instanceof StringLiteralExpr)
+                || typeName.equals(STRING_TYPE) || typeName.equals("java.lang.String");
     }
 
     private static Expression coerceToLong(Expression value, String typeName) {
