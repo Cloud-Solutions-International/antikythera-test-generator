@@ -32,7 +32,9 @@ import com.github.javaparser.ast.type.VoidType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import sa.com.cloudsolutions.antikythera.configuration.Settings;
 import sa.com.cloudsolutions.antikythera.parser.ImportWrapper;
+import sa.com.cloudsolutions.antikythera.parser.ProcessingReport;
 import sa.com.cloudsolutions.antikythera.parser.RestControllerParser;
 
 import java.util.List;
@@ -66,6 +68,8 @@ import java.util.Map;
  */
 public class SpringTestGenerator extends  TestGenerator {
     private static final Logger logger = LoggerFactory.getLogger(SpringTestGenerator.class);
+    public static final String STRING = "String";
+    public static final String ASSERT = "Assert";
     /**
      * The URL path component common to all functions in a controller.
      */
@@ -79,7 +83,9 @@ public class SpringTestGenerator extends  TestGenerator {
         cu.getPackageDeclaration().ifPresent(gen::setPackageDeclaration);
 
         ClassOrInterfaceDeclaration cdecl =  gen.addClass(className);
-        cdecl.addExtendedType("TestHelper");
+        String baseClass = Settings.getProperty(Settings.BASE_TEST_CLASS, String.class)
+                .orElse("TestHelper");
+        cdecl.addExtendedType(baseClass);
     }
 
     /**
@@ -94,6 +100,7 @@ public class SpringTestGenerator extends  TestGenerator {
 
         if (cd instanceof MethodDeclaration md) {
             RestControllerParser.getStats().setTests(RestControllerParser.getStats().getTests() + 1);
+            ProcessingReport.getInstance().incrementCurrentMethodTests();
             for (AnnotationExpr annotation : md.getAnnotations()) {
                 if (annotation.getNameAsString().equals("GetMapping")) {
                     buildGetMethodTests(annotation, controllerResponse);
@@ -216,13 +223,13 @@ public class SpringTestGenerator extends  TestGenerator {
 
                 body.addStatement(createResponseObject(respType));
 
-                MethodCallExpr as = new MethodCallExpr(new NameExpr("Assert"), "assertNotNull");
+                MethodCallExpr as = new MethodCallExpr(new NameExpr(ASSERT), "assertNotNull");
                 as.addArgument("resp");
                 body.addStatement(new ExpressionStmt(as));
 
                 asserter.addFieldAsserts(resp, body);
             } else {
-                MethodCallExpr as = new MethodCallExpr(new NameExpr("Assert"), "assertTrue");
+                MethodCallExpr as = new MethodCallExpr(new NameExpr(ASSERT), "assertTrue");
                 as.addArgument("response.getBody().asString().isEmpty()");
                 body.addStatement(new ExpressionStmt(as));
                 addHttpStatusCheck(body, resp.getStatusCode());
@@ -283,7 +290,7 @@ public class SpringTestGenerator extends  TestGenerator {
              */
             if (returnType.isClassOrInterfaceType() && returnType.asClassOrInterfaceType().getTypeArguments().isPresent()) {
                 NodeList<Type> a = returnType.asClassOrInterfaceType().getTypeArguments().get();
-                if (!a.isEmpty() && a.getFirst().isPresent() && a.getFirst().get().toString().equals("String")) {
+                if (!a.isEmpty() && a.getFirst().isPresent() && a.getFirst().get().toString().equals(STRING)) {
                     testForResponseBodyAsString((MethodDeclaration) methodUnderTest, resp, body);
                 }
                 else {
@@ -294,7 +301,7 @@ public class SpringTestGenerator extends  TestGenerator {
                 if (! incompatibleReturnTypes.contains(returnType.toString()))
                 {
                     Type respType = new ClassOrInterfaceType(null, returnType.asClassOrInterfaceType().getNameAsString());
-                    if (respType.toString().equals("String")) {
+                    if (respType.toString().equals(STRING)) {
                         testForResponseBodyAsString((MethodDeclaration) methodUnderTest, resp, body);
                     } else {
                         addCheckStatus(resp);
@@ -320,21 +327,20 @@ public class SpringTestGenerator extends  TestGenerator {
         var cdecl = requestBody.getType().asClassOrInterfaceType();
         switch (cdecl.getNameAsString()) {
             case "List": {
-                prepareBody("java.util.List", new ClassOrInterfaceType(null, paramClassName), "List.of", testMethod);
+                prepareBody(new ClassOrInterfaceType(null, paramClassName), "List.of", testMethod);
                 break;
             }
 
             case "Set": {
-                prepareBody("java.util.Set", new ClassOrInterfaceType(null, paramClassName), "Set.of", testMethod);
+                prepareBody(new ClassOrInterfaceType(null, paramClassName), "Set.of", testMethod);
                 break;
             }
 
             case "Map": {
-                prepareBody("java.util.Map", new ClassOrInterfaceType(null, paramClassName), "Map.of", testMethod);
+                prepareBody( new ClassOrInterfaceType(null, paramClassName), "Map.of", testMethod);
                 break;
             }
-            case "Integer":
-            case "Long": {
+            case "Integer", "Long": {
                 VariableDeclarator variableDeclarator = new VariableDeclarator(new ClassOrInterfaceType(null, "long"), "req");
                 variableDeclarator.setInitializer("0");
                 body.addStatement(new VariableDeclarationExpr(variableDeclarator));
@@ -343,8 +349,6 @@ public class SpringTestGenerator extends  TestGenerator {
             }
 
             case "MultipartFile": {
-                // todo solve this one
-                // dependencies.add("org.springframework.web.multipart.MultipartFile");
                 ClassOrInterfaceType multipartFile = new ClassOrInterfaceType(null, "MultipartFile");
                 VariableDeclarator variableDeclarator = new VariableDeclarator(multipartFile, "req");
                 MethodCallExpr methodCallExpr = new MethodCallExpr("uploadFile");
@@ -357,7 +361,7 @@ public class SpringTestGenerator extends  TestGenerator {
             case "Object": {
                 // SOme methods incorrectly have their DTO listed as of type Object. We will treat
                 // as a String
-                prepareBody("java.lang.String", new ClassOrInterfaceType(null, "String"), "new String", testMethod);
+                prepareBody( new ClassOrInterfaceType(null, STRING), "new String", testMethod);
                 break;
             }
 
@@ -399,9 +403,7 @@ public class SpringTestGenerator extends  TestGenerator {
         addQueryParams(makePost, request, body);
     }
 
-    private void prepareBody(String e, ClassOrInterfaceType paramClassName, String name, MethodDeclaration testMethod) {
-        // todo solve this one
-        // dependencies.add(e);
+    private void prepareBody(ClassOrInterfaceType paramClassName, String name, MethodDeclaration testMethod) {
         VariableDeclarator variableDeclarator = new VariableDeclarator(paramClassName, "req");
         MethodCallExpr methodCallExpr = new MethodCallExpr(name);
         variableDeclarator.setInitializer(methodCallExpr);
@@ -475,7 +477,7 @@ public class SpringTestGenerator extends  TestGenerator {
     {
         MethodCallExpr getStatusCodeCall = new MethodCallExpr(new NameExpr("response"), "getStatusCode");
 
-        MethodCallExpr assertTrueCall = new MethodCallExpr(new NameExpr("Assert"), "assertEquals");
+        MethodCallExpr assertTrueCall = new MethodCallExpr(new NameExpr(ASSERT), "assertEquals");
         assertTrueCall.addArgument(new IntegerLiteralExpr(statusCode));
         assertTrueCall.addArgument(getStatusCodeCall);
 

@@ -8,6 +8,7 @@ import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.type.PrimitiveType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import sa.com.cloudsolutions.antikythera.evaluator.AntikytheraRunTime;
@@ -36,41 +37,80 @@ public abstract class Asserter {
 
     private void addFieldAsserts(BlockStmt body, Evaluator ev) {
         int i = 0;
-        TypeDeclaration<?> type = AntikytheraRunTime.getTypeDeclaration(ev.getClassName()).orElseThrow();
-        for(FieldDeclaration field : type.getFields()) {
-            VariableDeclarator fieldVariable = field.getVariable(0);
-            try {
-                String fieldName = fieldVariable.getNameAsString();
-                Variable value = ev.getField(fieldName);
-
-                if (value != null && !fieldName.equals("serialVersionUID")
-                        && value.getValue() != null) {
-
-                    String getter = findGetter(value, fieldName, type);
-                    if (getter != null) {
-                        body.addStatement(fieldAssertion(getter, value));
-                        i++;
-                    }
-                }
-            } catch (Exception pex) {
-                logger.error("Error asserting {}", fieldVariable.getNameAsString(), pex);
-            }
-            if (i == 5) {
+        var typeOpt = AntikytheraRunTime.getTypeDeclaration(ev.getClassName());
+        if (typeOpt.isEmpty()) {
+            return;
+        }
+        TypeDeclaration<?> type = typeOpt.get();
+        for (FieldDeclaration field : type.getFields()) {
+            if (i >= 5) {
                 break;
+            }
+            if (tryAddFieldAssertion(body, ev, type, field.getVariable(0))) {
+                i++;
             }
         }
     }
 
-    private String findGetter(Variable value, String fieldName, TypeDeclaration<?> type) {
+    private boolean tryAddFieldAssertion(BlockStmt body, Evaluator ev, TypeDeclaration<?> type, VariableDeclarator fieldVariable) {
+        try {
+            String fieldName = fieldVariable.getNameAsString();
+            Variable value = ev.getField(fieldName);
+            if (value == null || fieldName.equals("serialVersionUID") || value.getValue() == null) {
+                return false;
+            }
+            if (shouldSkipCollectionFieldAssertion(fieldVariable, value)) {
+                return false;
+            }
+            String getter = findGetter(fieldName, type);
+            if (getter != null) {
+                body.addStatement(fieldAssertion(getter, value));
+                return true;
+            }
+        } catch (Exception pex) {
+            logger.error("Error asserting {}", fieldVariable.getNameAsString(), pex);
+        }
+        return false;
+    }
+
+    private boolean shouldSkipCollectionFieldAssertion(VariableDeclarator fieldVariable, Variable value) {
+        if (!(value.getValue() instanceof Collection<?>)) {
+            return false;
+        }
 
         /*
-         * For `boolean` fields that start with `is` immediately followed by a title-case
-         * letter, nothing is prefixed to generate the getter name.
-         * So if you have a field boolean isOrganic the getter will be isOrganic()
+         * The evaluator fabricates empty collections to keep traversal alive, but DTOs with no
+         * declared collection initializer often still return null at runtime after mapping.
+         * Only size-assert those fields when the source field itself declares a concrete
+         * initializer, OR when the collection is populated (non-empty).
+         */
+        Collection<?> collection = (Collection<?>) value.getValue();
+        return collection.isEmpty() && fieldVariable.getInitializer().isEmpty();
+    }
+
+    private String findGetter(String fieldName, TypeDeclaration<?> type) {
+
+        /*
+         * For `boolean` (primitive) fields that start with `is` immediately followed by a
+         * title-case letter, nothing is prefixed to generate the getter name.
+         * So if you have a field `boolean isOrganic` the getter will be `isOrganic()`.
+         * For `Boolean` (wrapper) fields the getter is always `getXxx()`, even when the
+         * field name starts with `is` (e.g. `Boolean isActive` → `getIsActive()`).
+         * We must consult the *declared* field type here, not the runtime type stored on
+         * the Variable, because the evaluator may have stored the value as a primitive
+         * boolean while the source field is declared as Boolean.
          */
         String getter;
-        if (value.getType() != null && value.getType().isPrimitiveType()
-                && value.getType().asString().equals("boolean") && fieldName.startsWith("is")) {
+        boolean declaredAsPrimitiveBoolean = false;
+        for (FieldDeclaration fd : type.getFields()) {
+            if (fd.getVariable(0).getNameAsString().equals(fieldName)) {
+                com.github.javaparser.ast.type.Type declaredType = fd.getElementType();
+                declaredAsPrimitiveBoolean = declaredType.isPrimitiveType()
+                        && declaredType.asPrimitiveType().getType() == PrimitiveType.Primitive.BOOLEAN;
+                break;
+            }
+        }
+        if (declaredAsPrimitiveBoolean && fieldName.startsWith("is")) {
             getter = fieldName;
         }
         else {

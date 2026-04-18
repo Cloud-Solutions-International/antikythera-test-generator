@@ -26,7 +26,7 @@ public abstract class TestGenerator implements ITestGenerator {
      * Because of overloaded methods and the need to write multiple tests for a single end point
      * we may end up with duplicate method names. To avoid that, query arguments are added as
      * suffixes to the method name.
-     * When the same method can have multiple tests, an alphabetic suffix is added to the method name.
+     * When the same method can have multiple tests, an incrementing suffix is added to the method name.
      */
     Set<String> testMethodNames = new HashSet<>();
 
@@ -69,6 +69,10 @@ public abstract class TestGenerator implements ITestGenerator {
         return GeneratorState.getImports();
     }
 
+    public static void clearImports() {
+        GeneratorState.clearImports();
+    }
+
     protected String createTestName(CallableDeclaration<?> md) {
         StringBuilder paramNames = new StringBuilder();
         for(var param : md.getParameters()) {
@@ -94,7 +98,12 @@ public abstract class TestGenerator implements ITestGenerator {
         }
 
         if (testMethodNames.contains(testName)) {
-            testName += "_" + (char)('A' + testMethodNames.size()  % 26 );
+            String base = testName;
+            int counter = 1;
+            do {
+                testName = base + "_" + counter;
+                counter++;
+            } while (testMethodNames.contains(testName));
         }
         testMethodNames.add(testName);
         return testName;
@@ -116,8 +125,9 @@ public abstract class TestGenerator implements ITestGenerator {
 
         md.findAncestor(TypeDeclaration.class).ifPresent(c ->
         {
-            String comment = String.format("Method under test: %s.%s()%nArgument generator : %s%nAuthor : Antikythera%n",
-                    c.getNameAsString(), md.getNameAsString(), argumentGenerator.getClass().getSimpleName());
+            String comment = String.format("Method under test: %s.%s()%nArgument generator : %s%n%s%n",
+                    c.getNameAsString(), md.getNameAsString(), argumentGenerator.getClass().getSimpleName(),
+                    TestGenerationConstants.GENERATED_COMMENT_AUTHOR_SPACED);
             tm.setJavadocComment(comment);
         });
 
@@ -129,6 +139,9 @@ public abstract class TestGenerator implements ITestGenerator {
 
         tm.setBody(body);
         tm.addAnnotation("Test");
+        // Declare 'throws Exception' so that Mockito.when() stubs that invoke methods with
+        // checked exception signatures (e.g. ObjectMapper.writeValueAsString) compile without error.
+        tm.addThrownException(new com.github.javaparser.ast.type.ClassOrInterfaceType(null, "Exception"));
         return tm;
     }
 
@@ -184,9 +197,7 @@ public abstract class TestGenerator implements ITestGenerator {
             
             for (MethodDeclaration method : type.getMethods()) {
                 if (method.getAnnotationByName("Test").isPresent()) {
-                    MethodDeclaration m = method.clone();
-                    m.setName("DUMMY");
-                    String fingerprint = m.toString();
+                    String fingerprint = fingerprintFor(method);
                     
                     if (methodFingerprints.contains(fingerprint)) {
                         methodsToRemove.add(method);
@@ -204,6 +215,27 @@ public abstract class TestGenerator implements ITestGenerator {
         }
         
         return removed;
+    }
+
+    private String normalizeFingerprint(String fingerprint) {
+        return fingerprint
+                .replace("java.util.ArrayList", "ArrayList")
+                .replace("java.util.HashMap", "HashMap")
+                .replace("java.util.HashSet", "HashSet")
+                .replace("java.util.LinkedHashMap", "LinkedHashMap")
+                .replace("java.util.LinkedHashSet", "LinkedHashSet")
+                .replace("java.util.LinkedList", "LinkedList")
+                .replace("java.util.List.of", "List.of")
+                .replace("java.util.Map.of", "Map.of")
+                .replace("new ArrayList()", "new ArrayList<>()")
+                .replace("new HashMap()", "new HashMap<>()")
+                .replace("new HashSet()", "new HashSet<>()");
+    }
+
+    protected String fingerprintFor(MethodDeclaration method) {
+        MethodDeclaration copy = method.clone();
+        copy.setName("DUMMY");
+        return normalizeFingerprint(copy.toString());
     }
 
     @SuppressWarnings("java:S1130") // this exception will be thrown by subclasses hence the need to declare here

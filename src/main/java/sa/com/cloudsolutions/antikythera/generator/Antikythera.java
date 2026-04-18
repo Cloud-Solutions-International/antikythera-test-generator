@@ -16,6 +16,7 @@ import sa.com.cloudsolutions.antikythera.exception.AntikytheraException;
 import sa.com.cloudsolutions.antikythera.exception.EvaluatorException;
 import sa.com.cloudsolutions.antikythera.parser.AbstractCompiler;
 import sa.com.cloudsolutions.antikythera.parser.MavenHelper;
+import sa.com.cloudsolutions.antikythera.parser.ProcessingReport;
 import sa.com.cloudsolutions.antikythera.parser.RestControllerParser;
 import sa.com.cloudsolutions.antikythera.parser.ServicesParser;
 import sa.com.cloudsolutions.antikythera.parser.Stats;
@@ -38,7 +39,6 @@ public class Antikythera {
 
     public static final String SRC = "src";
     private static final Logger logger = LoggerFactory.getLogger(Antikythera.class);
-    private static final String PACKAGE_PATH = "src/main/java/sa/com/cloudsolutions/antikythera";
     public static final String JAVA = ".java";
     private static Antikythera instance;
     private final Collection<String> controllers;
@@ -99,7 +99,14 @@ public class Antikythera {
     }
 
     public static void main(String[] args) throws IOException, XmlPullParserException, EvaluatorException {
+        if (args.length > 0 && !args[0].isBlank()) {
+            Settings.loadConfigMap(new File(args[0].trim()));
+        }
+        ProcessingReport.getInstance().reset();
         Antikythera antk = Antikythera.getInstance();
+        if (isFallbackMode()) {
+            logger.info("No explicit controllers or services configured — using full-project fallback discovery for unit tests");
+        }
         antk.preProcess();
         antk.generateApiTests();
         Stats stats = RestControllerParser.getStats();
@@ -109,12 +116,19 @@ public class Antikythera {
         logger.info("Generated {} tests", stats.getTests());
 
         antk.generateUnitTests();
+
+        String reportJson = ProcessingReport.getInstance().toJson();
+        String reportPath = resolveProcessingReportPath();
+        antk.writeFile(reportPath, reportJson);
+        logger.info("Processing report written to {}", reportPath);
     }
 
     private void copyBaseFiles(String outputPath) throws IOException, XmlPullParserException {
-        String testPath = PACKAGE_PATH.replace("main", "test");
-        mavenHelper.copyPom();
-        String name = mavenHelper.copyTemplate("TestHelper.txt", testPath, "base");
+        // outputPath is already the java source root (e.g. .../src/test/java), so the
+        // package path must be relative to it — not include "src/test/java" again.
+        String antikytheraPkgPath = "sa/com/cloudsolutions/antikythera";
+        mavenHelper.copyPom(Paths.get(deriveProjectRoot(outputPath)));
+        String name = CopyUtils.copyTemplate("TestHelper.txt", outputPath, antikytheraPkgPath, "base");
         if (name == null) {
             return;
         }
@@ -123,21 +137,17 @@ public class Antikythera {
         File f = new File(name);
         if (f.renameTo(new File(java))) {
 
-            mavenHelper.copyTemplate("Configurations.java", testPath, "configurations");
+            CopyUtils.copyTemplate("Configurations.java", outputPath, antikytheraPkgPath, "configurations");
 
-            Path pathToCopy = Paths.get(outputPath, SRC, "test", "resources");
+            // Resources live one level above the java source root (src/test/resources)
+            Path pathToCopy = Paths.get(outputPath).getParent().resolve("resources");
             Files.createDirectories(pathToCopy);
             copyFolder(Paths.get(SRC, "test", "resources"), pathToCopy);
 
-            pathToCopy = Paths.get(outputPath, PACKAGE_PATH, "constants");
+            pathToCopy = Paths.get(outputPath, antikytheraPkgPath, "constants");
             Files.createDirectories(pathToCopy);
-            /*
-             * Todo resurrect the Constants class that as in the
-             * com.sa.com.cloudsolutions.antikythera.constants package
-             * and move it to the resources
-             * copyFolder(Paths.get(PACKAGE_PATH, "constants"), pathToCopy);
-             */
-            pathToCopy = Paths.get(outputPath, PACKAGE_PATH, "configurations");
+
+            pathToCopy = Paths.get(outputPath, antikytheraPkgPath, "configurations");
             Files.createDirectories(pathToCopy);
         } else {
             throw new AntikytheraException("Could not copy resources");
@@ -157,6 +167,7 @@ public class Antikythera {
      */
     public void generateApiTests() throws IOException, XmlPullParserException, EvaluatorException {
         for (String controller : controllers) {
+            MockingRegistry.clearMockedFields();
 
             String controllersCleaned = controller.replace(JAVA, "").split("#")[0];
             RestControllerParser processor = new RestControllerParser(controllersCleaned);
@@ -175,26 +186,100 @@ public class Antikythera {
     public void writeFile(String filePath, String content) throws IOException {
         File file = new File(filePath);
         File parentDir = file.getParentFile();
-        Files.createDirectories(parentDir.toPath());
+        if (parentDir != null) {
+            Files.createDirectories(parentDir.toPath());
+        }
         try (FileWriter writer = new FileWriter(file)) {
             writer.write(content);
             writer.flush();
         }
     }
 
+    private static String resolveProcessingReportPath() {
+        return Settings.getProperty(Settings.PROCESSING_REPORT_PATH, String.class)
+                .filter(path -> !path.isBlank())
+                .map(Paths::get)
+                .map(Path::toAbsolutePath)
+                .map(Path::normalize)
+                .map(Path::toString)
+                .orElseGet(() -> Paths.get(System.getProperty("user.dir"), "processing-report.json").toString());
+    }
+
     public void preProcess() throws IOException, XmlPullParserException {
         mavenHelper = new MavenHelper();
         mavenHelper.readPomFile();
-        if (!controllers.isEmpty() || !services.isEmpty()) {
-            CopyUtils.createMavenProjectStructure(Settings.getBasePackage(), Settings.getOutputPath());
+        if (!controllers.isEmpty()) {
+            // API tests are written into a standalone Maven project rooted at deriveProjectRoot().
+            CopyUtils.createMavenProjectStructure(Settings.getBasePackage(), deriveProjectRoot(Settings.getOutputPath()));
             copyBaseFiles(Settings.getOutputPath());
         }
 
         AbstractCompiler.preProcess();
+    }
 
+    /**
+     * Derives the standalone project root from the configured output path.
+     *
+     * <p>By convention {@code output_path} points to the {@code src/test/java} directory of the
+     * generated project (e.g. {@code /foo/bar/src/test/java}).  Stripping those three trailing
+     * components yields the project root ({@code /foo/bar}), which is where the Maven project
+     * structure and the generated {@code pom.xml} should live. If the path does not end with that
+     * suffix, this method falls back to the provided output path. If it does end with that suffix
+     * but is too shallow to derive a parent project directory, this method throws an
+     * {@link IllegalArgumentException}.</p>
+     *
+     * @param outputPath the value of {@code output_path} from the generator configuration
+     * @return the project root path
+     */
+    static String deriveProjectRoot(String outputPath) {
+        Path p = Paths.get(outputPath).normalize();
+        Path parent = p.getParent();
+        Path grandParent = parent != null ? parent.getParent() : null;
+        Path greatGrandParent = grandParent != null ? grandParent.getParent() : null;
+
+        if (p.getFileName() != null
+                && "java".equals(p.getFileName().toString())
+                && parent != null
+                && parent.getFileName() != null
+                && "test".equals(parent.getFileName().toString())
+                && grandParent != null
+                && grandParent.getFileName() != null
+                && "src".equals(grandParent.getFileName().toString())) {
+            if (greatGrandParent == null) {
+                throw new IllegalArgumentException("Invalid generator configuration: output_path '"
+                        + outputPath
+                        + "' is too shallow to derive project root. Expected a path like <project>/src/test/java.");
+            }
+            return greatGrandParent.toString();
+        }
+        return p.toString();
+    }
+
+    /**
+     * True when both {@code controllers} and {@code services} are absent or empty in {@code generator.yml},
+     * enabling full-project unit-test discovery via {@link UnitTestDiscovery#discoverFallbackUnitTargets()}.
+     */
+    public static boolean isFallbackMode() {
+        Collection<String> c = Settings.getPropertyList(Settings.CONTROLLERS, String.class);
+        Collection<String> s = Settings.getPropertyList(Settings.SERVICES, String.class);
+        return c.isEmpty() && s.isEmpty();
     }
 
     private void generateUnitTests() throws IOException {
+        if (isFallbackMode()) {
+            List<String> targets = UnitTestDiscovery.discoverFallbackUnitTargets();
+            logger.info("Fallback mode: processing {} discovered unit target(s)", targets.size());
+            for (String path : targets) {
+                try {
+                    processService(path, new String[] { path });
+                } catch (Exception t) {
+                    ProcessingReport.getInstance().recordClassFailed(path, t.toString());
+                    logger.warn("Fallback: skipped unit target {} — {}", path, t.toString());
+                    logger.debug("Fallback skip stack trace for {}", path, t);
+                }
+            }
+            return;
+        }
         for (String service : services) {
             String[] parts = service.split("#");
             String path = parts[0];
@@ -230,6 +315,7 @@ public class Antikythera {
             }
         } catch (IOException e) {
             logger.error("Failed to process service file {}", file, e);
+            ProcessingReport.getInstance().recordClassFailed(file.toString(), e.getMessage());
         }
     }
 
@@ -245,12 +331,16 @@ public class Antikythera {
                 logger.debug(
                         "Skipping {} - class not found in compilation unit cache. File package ({}) may not match directory structure.",
                         className, packageName.orElse("default package"));
+                ProcessingReport.getInstance().recordClassSkipped(className,
+                        "class not found in compilation unit cache (package/directory mismatch)");
                 return null;
             }
 
             return className;
         } catch (Exception e) {
             logger.debug("Could not parse file {} to determine class name", file, e);
+            ProcessingReport.getInstance().recordClassSkipped(file.toString(),
+                    "could not parse file: " + e.getMessage());
             return null;
         }
     }
@@ -258,6 +348,7 @@ public class Antikythera {
     private void processService(String servicePath, String[] parts) throws IOException {
         logger.info("******************");
         logger.info("Processing service {}", servicePath);
+        MockingRegistry.clearMockedFields();
 
         ServicesParser processor = new ServicesParser(servicePath);
         String entry = parts.length == 2 ? servicePath + "#" + parts[1] : servicePath;

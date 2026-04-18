@@ -8,6 +8,7 @@ import com.github.javaparser.ast.stmt.BlockStmt;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -39,6 +40,10 @@ class TestTestGenerator {
             }
         };
         testGenerator.gen = testCompilationUnit; // Set the protected gen field
+    }
+
+    private MethodDeclaration method(String signature) {
+        return StaticJavaParser.parseMethodDeclaration(signature);
     }
 
     @Test
@@ -135,5 +140,26 @@ class TestTestGenerator {
         assertEquals(1, testClass.getMethods().size());
         assertFalse(testGenerator.removeDuplicateTests(), "Should return false if no test methods are present");
         assertEquals(1, testClass.getMethods().size());
+    }
+
+    @Test
+    void testCreateTestName_duplicateUsesNumericSuffix() {
+        MethodDeclaration md = method("public void calculate() {}");
+
+        assertEquals("calculateTest", testGenerator.createTestName(md));
+        assertEquals("calculateTest_1", testGenerator.createTestName(md));
+        assertEquals("calculateTest_2", testGenerator.createTestName(md));
+    }
+
+    @Test
+    void testCreateTestName_manyCollisionsStillTerminates() {
+        MethodDeclaration md = method("public void calculate() {}");
+        testGenerator.testMethodNames.add("calculateTest");
+        for (int i = 1; i <= 30; i++) {
+            testGenerator.testMethodNames.add("calculateTest_" + i);
+        }
+
+        String generated = assertTimeoutPreemptively(Duration.ofMillis(200), () -> testGenerator.createTestName(md));
+        assertEquals("calculateTest_31", generated);
     }
 }
