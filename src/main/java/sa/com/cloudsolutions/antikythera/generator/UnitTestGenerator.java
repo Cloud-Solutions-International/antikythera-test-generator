@@ -924,7 +924,7 @@ public class UnitTestGenerator extends TestGenerator {
             String concreteType;
             String importClass;
             switch (fieldTypeName) {
-                case "Set", "HashSet" -> {
+                case "Set", HASH_SET -> {
                     concreteType = "HashSet()";
                     importClass = "java.util.HashSet";
                 }
@@ -1863,8 +1863,8 @@ public class UnitTestGenerator extends TestGenerator {
             return;
         }
         String seedText = seedCall.toString();
-        if (!(seedText.startsWith("java.util.List.of(") || seedText.startsWith("List.of(")
-                || seedText.startsWith("java.util.Set.of(") || seedText.startsWith("Set.of("))) {
+        if (!(seedText.startsWith("java.util.List.of(") || seedText.startsWith(LIST_OF_PREFIX)
+                || seedText.startsWith("java.util.Set.of(") || seedText.startsWith(SET_OF_PREFIX))) {
             return;
         }
         Type elementType = elementTypeOpt.orElseThrow();
@@ -2377,14 +2377,14 @@ public class UnitTestGenerator extends TestGenerator {
     private static Optional<String> valueFieldInitializerLiteral(Type type) {
         if (type instanceof PrimitiveType p) {
             return Optional.of(switch (p.getType()) {
-                case BOOLEAN -> "false";
-                case BYTE -> "(byte)0";
-                case SHORT -> "(short)0";
+                case BOOLEAN -> FALSE_LITERAL;
+                case BYTE -> BYTE_ZERO;
+                case SHORT -> SHORT_ZERO;
                 case INT -> "0";
                 case LONG -> "0L";
                 case FLOAT -> "0.0f";
                 case DOUBLE -> "0.0";
-                case CHAR -> "'\\0'";
+                case CHAR -> NULL_CHAR_LITERAL;
             });
         }
         if (type.isClassOrInterfaceType()) {
@@ -2432,7 +2432,7 @@ public class UnitTestGenerator extends TestGenerator {
         }
 
         for (TypeDeclaration<?> t : gen.getTypes()) {
-            if(t.findFirst(MethodDeclaration.class, m -> m.getNameAsString().equals("setUp")).isEmpty()) {
+            if(t.findFirst(MethodDeclaration.class, m -> m.getNameAsString().equals(SET_UP)).isEmpty()) {
                 t.addMember(before);
             }
         }

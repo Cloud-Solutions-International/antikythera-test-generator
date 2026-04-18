@@ -8,6 +8,8 @@ import com.github.javaparser.ast.body.TypeDeclaration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import sa.com.cloudsolutions.antikythera.evaluator.AntikytheraRunTime;
 import sa.com.cloudsolutions.antikythera.parser.AbstractCompiler;
 
@@ -298,32 +300,44 @@ class TargetClassifierTest {
         assertEquals(SkipReason.EXCEPTION_CLASS, r.reason());
     }
 
-    @Test
-    void runtimeExceptionWithComplexGetterLogic_isUnitTarget() {
-        CompilationUnit cu = StaticJavaParser.parse("""
-                public class RichException extends RuntimeException {
-                    private final int code;
-                    public RichException(int code) { this.code = code; }
-                    public boolean isCritical() {
-                        return code >= 500 && code < 600;
-                    }
+    @ParameterizedTest
+    @ValueSource(strings = {
+            """
+            public class RichException extends RuntimeException {
+                private final int code;
+                public RichException(int code) { this.code = code; }
+                public boolean isCritical() {
+                    return code >= 500 && code < 600;
                 }
-                """);
-        ClassOrInterfaceDeclaration t = cu.getType(0).asClassOrInterfaceDeclaration();
-        TypeWrapper tw = wrap(t);
-        ClassificationResult r = TargetClassifier.classify(tw);
-        assertTrue(r.isUnitTarget());
-    }
-
-    @Test
-    void dtoNameWithRealLogic_isUnitTarget() {
-        CompilationUnit cu = StaticJavaParser.parse("""
-                public class ProblemDto {
-                    public int compute() {
-                        return 42;
-                    }
+            }
+            """,
+            """
+            public class ProblemDto {
+                public int compute() {
+                    return 42;
                 }
-                """);
+            }
+            """,
+            """
+            import jakarta.persistence.EntityManager;
+            @Repository
+            public class CustomRepo {
+                private EntityManager em;
+                public void runNative() {
+                    em.createNativeQuery("select 1").executeUpdate();
+                }
+            }
+            """,
+            """
+            public class BusinessMath {
+                public static int score(int base) {
+                    return base > 10 ? base * 2 : base + 1;
+                }
+            }
+            """
+    })
+    void classesWithRealLogic_areUnitTargets(String source) {
+        CompilationUnit cu = StaticJavaParser.parse(source);
         ClassOrInterfaceDeclaration t = cu.getType(0).asClassOrInterfaceDeclaration();
         TypeWrapper tw = wrap(t);
         ClassificationResult r = TargetClassifier.classify(tw);
@@ -370,39 +384,6 @@ class TargetClassifierTest {
         TypeWrapper tw = wrap(t);
         ClassificationResult r = TargetClassifier.classify(tw);
         assertEquals(SkipReason.MAIN_CLASS, r.reason());
-    }
-
-    @Test
-    void repositoryImplWithEntityManager_isUnitTarget() {
-        CompilationUnit cu = StaticJavaParser.parse("""
-                import jakarta.persistence.EntityManager;
-                @Repository
-                public class CustomRepo {
-                    private EntityManager em;
-                    public void runNative() {
-                        em.createNativeQuery("select 1").executeUpdate();
-                    }
-                }
-                """);
-        ClassOrInterfaceDeclaration t = cu.getType(0).asClassOrInterfaceDeclaration();
-        TypeWrapper tw = wrap(t);
-        ClassificationResult r = TargetClassifier.classify(tw);
-        assertTrue(r.isUnitTarget());
-    }
-
-    @Test
-    void staticUtilityWithRealLogic_isUnitTarget() {
-        CompilationUnit cu = StaticJavaParser.parse("""
-                public class BusinessMath {
-                    public static int score(int base) {
-                        return base > 10 ? base * 2 : base + 1;
-                    }
-                }
-                """);
-        ClassOrInterfaceDeclaration t = cu.getType(0).asClassOrInterfaceDeclaration();
-        TypeWrapper tw = wrap(t);
-        ClassificationResult r = TargetClassifier.classify(tw);
-        assertTrue(r.isUnitTarget());
     }
 
     @Test
